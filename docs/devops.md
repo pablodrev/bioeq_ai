@@ -8,6 +8,13 @@
 cp .env.example .env
 ```
 
+Обязательно задайте секреты перед запуском:
+
+- `POSTGRES_PASSWORD`
+- `MINIO_ROOT_PASSWORD`
+- `REDIS_PASSWORD`
+- `QDRANT_API_KEY`
+
 2. Поднимите стек:
 
 ```bash
@@ -74,6 +81,19 @@ Workflow: `.github/workflows/deploy.yml`
 
 Необходимые secrets в репозитории:
 
+- `POSTGRES_DB` - имя БД для CI-стека (по умолчанию `postgres_bioeq`)
+- `POSTGRES_USER` - пользователь БД для CI-стека (по умолчанию `postgres_bioeq_user`)
+- `POSTGRES_PASSWORD` - пароль БД (обязателен)
+- `MINIO_ROOT_USER` - root-пользователь MinIO (по умолчанию `minio_bioeq_root`)
+- `MINIO_ROOT_PASSWORD` - root-пароль MinIO (обязателен)
+- `REDIS_PASSWORD` - пароль Redis (обязателен)
+- `REDIS_URL` - URL Redis (если не указан, собирается из `REDIS_PASSWORD`)
+- `DATABASE_URL` - URL Postgres (если не указан, собирается из `POSTGRES_*`)
+- `MINIO_ENDPOINT` - endpoint MinIO (по умолчанию `minio:9000`)
+- `MINIO_ACCESS_KEY` - access key MinIO (по умолчанию `MINIO_ROOT_USER`)
+- `MINIO_SECRET_KEY` - secret key MinIO (по умолчанию `MINIO_ROOT_PASSWORD`)
+- `QDRANT_URL` - URL Qdrant (по умолчанию `http://qdrant:6333`)
+- `QDRANT_API_KEY` - API key Qdrant (обязателен)
 - `SERVER_HOST` - IP/домен сервера
 - `SERVER_USER` - SSH-пользователь
 - `SERVER_SSH_KEY` - приватный SSH-ключ

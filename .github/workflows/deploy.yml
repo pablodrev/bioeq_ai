@@ -41,18 +41,22 @@ jobs:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
           MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           MINIO_ENDPOINT: ${{ secrets.MINIO_ENDPOINT }}
           MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
           MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
           QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
         run: |
           set -euo pipefail
 
           required_secrets=(
             POSTGRES_PASSWORD
             MINIO_ROOT_PASSWORD
+            REDIS_PASSWORD
+            QDRANT_API_KEY
           )
 
           for key in "${required_secrets[@]}"; do
@@ -63,19 +67,21 @@ jobs:
           done
 
           cat > .env <<EOF
-          POSTGRES_DB=${POSTGRES_DB:-bioeq}
-          POSTGRES_USER=${POSTGRES_USER:-bioeq_user}
+          POSTGRES_DB=${POSTGRES_DB:-postgres_bioeq}
+          POSTGRES_USER=${POSTGRES_USER:-postgres_bioeq_user}
           POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 
-          MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+          MINIO_ROOT_USER=${MINIO_ROOT_USER:-minio_bioeq_root}
           MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
 
-          REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-          DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-bioeq_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bioeq}}
+          REDIS_PASSWORD=${REDIS_PASSWORD}
+          REDIS_URL=${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+          DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres_bioeq_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-postgres_bioeq}}
           MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
-          MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-${MINIO_ROOT_USER:-minioadmin}}
+          MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-${MINIO_ROOT_USER:-minio_bioeq_root}}
           MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-${MINIO_ROOT_PASSWORD}}
           QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+          QDRANT_API_KEY=${QDRANT_API_KEY}
           EOF
 
       - name: Start docker compose stack

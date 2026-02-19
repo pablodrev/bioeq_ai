@@ -5,7 +5,8 @@ from services.redis_client import redis_delete, redis_exists, redis_get_json, re
 
 
 def test_redis_roundtrip() -> None:
-    os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+    redis_password = os.environ.setdefault("REDIS_PASSWORD", "redis_bioeq_password_change_me")
+    os.environ.setdefault("REDIS_URL", f"redis://:{redis_password}@localhost:6379/0")
 
     key = f"wake-up:redis:{uuid4().hex}"
     payload = {"service": "redis", "ok": True}

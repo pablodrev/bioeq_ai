@@ -12,6 +12,7 @@ from services.qdrant_client import (
 
 def test_qdrant_upsert_search_delete() -> None:
     os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
+    os.environ.setdefault("QDRANT_API_KEY", "qdrant_bioeq_api_key_change_me")
 
     collection = f"wake_up_{uuid4().hex[:16]}"
     point_id = str(uuid4())

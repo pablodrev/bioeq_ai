@@ -6,7 +6,7 @@ from services.postgres_client import pg_fetch_all, pg_fetch_one, pg_healthcheck
 def test_postgres_healthcheck() -> None:
     os.environ.setdefault(
         "DATABASE_URL",
-        "postgresql://bioeq_user:change_me@localhost:5432/bioeq",
+        "postgresql://postgres_bioeq_user:postgres_bioeq_password_change_me@localhost:5432/postgres_bioeq",
     )
     assert pg_healthcheck() is True
 
@@ -14,7 +14,7 @@ def test_postgres_healthcheck() -> None:
 def test_postgres_read_queries() -> None:
     os.environ.setdefault(
         "DATABASE_URL",
-        "postgresql://bioeq_user:change_me@localhost:5432/bioeq",
+        "postgresql://postgres_bioeq_user:postgres_bioeq_password_change_me@localhost:5432/postgres_bioeq",
     )
 
     one = pg_fetch_one("SELECT 1 AS id, 'ok' AS status;")

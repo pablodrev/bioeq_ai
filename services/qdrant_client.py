@@ -7,9 +7,12 @@ from qdrant_client.http.models import Distance, PointStruct, VectorParams
 
 def get_qdrant_client() -> QdrantClient:
     qdrant_url = os.getenv("QDRANT_URL")
+    qdrant_api_key = os.getenv("QDRANT_API_KEY")
     if not qdrant_url:
         raise ValueError("Переменная окружения QDRANT_URL не задана")
-    return QdrantClient(url=qdrant_url)
+    if not qdrant_api_key:
+        raise ValueError("Переменная окружения QDRANT_API_KEY не задана")
+    return QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
 
 
 def ensure_collection(collection_name: str, vector_size: int) -> None:
