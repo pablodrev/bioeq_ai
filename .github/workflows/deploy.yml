@@ -152,5 +152,15 @@ jobs:
             set -e
             cd "$DEPLOY_PATH"
             docker login ghcr.io -u "$GHCR_USERNAME" -p "$GHCR_TOKEN"
-            APP_IMAGE="$IMAGE_NAME:latest" docker compose -f docker-compose.yml -f docker-compose.prod.yml pull app
-            APP_IMAGE="$IMAGE_NAME:latest" docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
+
+            if docker compose version >/dev/null 2>&1; then
+              COMPOSE_CMD="docker compose"
+            elif command -v docker-compose >/dev/null 2>&1; then
+              COMPOSE_CMD="docker-compose"
+            else
+              echo "Neither 'docker compose' nor 'docker-compose' is available on server"
+              exit 1
+            fi
+
+            APP_IMAGE="$IMAGE_NAME:latest" sh -c "$COMPOSE_CMD -f docker-compose.yml -f docker-compose.prod.yml pull app"
+            APP_IMAGE="$IMAGE_NAME:latest" sh -c "$COMPOSE_CMD -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans"
