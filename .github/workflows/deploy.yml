@@ -1,0 +1,150 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - devops
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/bioeq-ai
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest ruff
+
+      - name: Run linter
+        run: ruff check .
+
+      - name: Prepare environment file from CI secrets
+        env:
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
+          MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          MINIO_ENDPOINT: ${{ secrets.MINIO_ENDPOINT }}
+          MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
+          MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+        run: |
+          set -euo pipefail
+
+          required_secrets=(
+            POSTGRES_PASSWORD
+            MINIO_ROOT_PASSWORD
+          )
+
+          for key in "${required_secrets[@]}"; do
+            if [ -z "${!key:-}" ]; then
+              echo "::error::Missing required secret: $key"
+              exit 1
+            fi
+          done
+
+          cat > .env <<EOF
+          POSTGRES_DB=${POSTGRES_DB:-bioeq}
+          POSTGRES_USER=${POSTGRES_USER:-bioeq_user}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+
+          MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+          MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+
+          REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+          DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-bioeq_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bioeq}}
+          MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+          MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-${MINIO_ROOT_USER:-minioadmin}}
+          MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-${MINIO_ROOT_PASSWORD}}
+          QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+          EOF
+
+      - name: Start docker compose stack
+        run: docker compose up -d --build
+
+      - name: Wait for app health
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:8000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "App health check did not become ready in time"
+          docker compose ps
+          exit 1
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Stop docker compose stack
+        if: always()
+        run: docker compose down -v
+
+  build:
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Сборка и публикация образа приложения в GHCR
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # Подключение к серверу и обновление только сервиса app
+      - name: Deploy on server via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || '22' }}
+          envs: IMAGE_NAME,DEPLOY_PATH,GHCR_USERNAME,GHCR_TOKEN
+          script: |
+            set -e
+            cd "$DEPLOY_PATH"
+            docker login ghcr.io -u "$GHCR_USERNAME" -p "$GHCR_TOKEN"
+            APP_IMAGE="$IMAGE_NAME:latest" docker compose -f docker-compose.yml -f docker-compose.prod.yml pull app
+            APP_IMAGE="$IMAGE_NAME:latest" docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans

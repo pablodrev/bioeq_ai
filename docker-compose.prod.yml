@@ -1,0 +1,4 @@
+services:
+  app:
+    build: null
+    image: ${APP_IMAGE}
