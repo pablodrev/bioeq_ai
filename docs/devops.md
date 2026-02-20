@@ -64,6 +64,7 @@ pytest -q tests/on_wake_up
 ## Сервисы в docker-compose
 
 - `app` (приложение из `main.py` на FastAPI + uvicorn)
+- `nginx` (reverse proxy для входящего HTTP, порт `8080` -> `app:8000`)
 - `redis` (порт `6379`)
 - `postgres` (порт `5432`)
 - `minio` (порты `9000`, `9001`)

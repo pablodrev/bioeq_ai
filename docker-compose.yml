@@ -22,6 +22,19 @@ services:
       minio:
         condition: service_started
 
+  # Reverse proxy для входящего HTTP-трафика
+  nginx:
+    image: nginx:alpine
+    container_name: bioeq-ai-nginx
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_started
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+
   # Кэш/брокер
   redis:
     image: redis:7-alpine
