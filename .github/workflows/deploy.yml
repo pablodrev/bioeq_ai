@@ -215,4 +215,5 @@ jobs:
 
             APP_IMAGE="$IMAGE_NAME:latest" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE pull app"
             docker ps -aq --filter "name=bioeq-ai-app" | xargs -r docker rm -f >/dev/null 2>&1 || true
-            APP_IMAGE="$IMAGE_NAME:latest" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE up -d --remove-orphans --no-build"
+            docker ps -aq --filter "name=bioeq-ai-nginx" | xargs -r docker rm -f >/dev/null 2>&1 || true
+            APP_IMAGE="$IMAGE_NAME:latest" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE up -d --remove-orphans --no-build app nginx"
