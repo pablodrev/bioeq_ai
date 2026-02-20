@@ -49,6 +49,7 @@ jobs:
           MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
           QDRANT_URL: ${{ secrets.QDRANT_URL }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          NGINX_PORT: ${{ secrets.NGINX_PORT }}
         run: |
           set -euo pipefail
 
@@ -82,6 +83,7 @@ jobs:
           MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-${MINIO_ROOT_PASSWORD}}
           QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
           QDRANT_API_KEY=${QDRANT_API_KEY}
+          NGINX_PORT=${NGINX_PORT:-18080}
           EOF
 
       - name: Start docker compose stack

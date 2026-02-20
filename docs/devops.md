@@ -27,6 +27,12 @@ docker compose up -d --build
 curl http://localhost:8000/health
 ```
 
+Через nginx (если нужен вход через reverse proxy):
+
+```bash
+curl http://localhost:18080/health
+```
+
 ## Запуск тестов в venv
 
 1. Создайте и активируйте виртуальное окружение:
@@ -64,7 +70,7 @@ pytest -q tests/on_wake_up
 ## Сервисы в docker-compose
 
 - `app` (приложение из `main.py` на FastAPI + uvicorn)
-- `nginx` (reverse proxy для входящего HTTP, порт `8080` -> `app:8000`)
+- `nginx` (reverse proxy для входящего HTTP, порт `${NGINX_PORT:-18080}` -> `app:8000`)
 - `redis` (порт `6379`)
 - `postgres` (порт `5432`)
 - `minio` (порты `9000`, `9001`)
@@ -102,6 +108,7 @@ Workflow: `.github/workflows/deploy.yml`
 - `DEPLOY_PATH` - абсолютный путь к проекту на сервере (пример: `/opt/bioeq_ai`)
 - `GHCR_USERNAME` - пользователь GitHub с доступом к пакетам
 - `GHCR_TOKEN` - токен GitHub с правом `read:packages` (для pull образа на сервере)
+- `NGINX_PORT` - опционально, внешний порт nginx (по умолчанию `18080`)
 
 ## Деплой
 
