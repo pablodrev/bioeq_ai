@@ -4,7 +4,7 @@ Orchestrates PubMed search, LLM extraction, and result aggregation.
 """
 import logging
 from dotenv import load_dotenv
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 from services.pubmed import PubMedClient
 from services.llm_client import YandexGPTClient

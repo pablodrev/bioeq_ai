@@ -3,7 +3,7 @@ Regulatory module.
 Quick regulatory compliance check based on study parameters.
 """
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any
 from sqlalchemy.orm import Session
 from models import DBProject
 

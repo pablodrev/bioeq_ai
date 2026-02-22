@@ -3,7 +3,7 @@ SQLAlchemy models for the database.
 """
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, JSON, UUID, Boolean, Integer
+from sqlalchemy import Column, String, DateTime, JSON, UUID, Boolean
 from database import Base
 
 class DBProject(Base):

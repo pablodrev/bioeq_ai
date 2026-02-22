@@ -4,7 +4,6 @@ Main entry point with all API endpoints.
 """
 import logging
 import uuid
-import os
 from pathlib import Path
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
@@ -16,7 +15,7 @@ from datetime import datetime
 from database import SessionLocal, init_db, get_db
 from schemas import (
     SearchStartRequest, SearchStartResponse, SearchResultsResponse,
-    ParameterSchema, ErrorResponse
+    ParameterSchema
 )
 from models import DBProject, DBDrugParameter
 from core.parsing_module import ParsingModule

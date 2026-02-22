@@ -3,7 +3,7 @@ Study design module.
 Calculates bioequivalence design parameters based on extracted drug data.
 """
 import logging
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
 from services.calculator import BioeEquivalenceCalculator
 from models import DBProject, DBDrugParameter
