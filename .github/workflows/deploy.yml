@@ -106,7 +106,10 @@ jobs:
 
       - name: Stop docker compose stack
         if: always()
-        run: docker compose down -v
+        run: |
+          # If earlier steps fail before creating .env, cleanup should still run safely.
+          [ -f .env ] || touch .env
+          docker compose --env-file .env down -v || true
 
   build:
     needs: quality
