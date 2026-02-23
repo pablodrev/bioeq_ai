@@ -7,16 +7,18 @@ import uuid
 from pathlib import Path
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException
+from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, File, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from datetime import datetime
+import tempfile
+import shutil
 
 from database import SessionLocal, init_db, get_db
 from schemas import (
     SearchStartRequest, SearchStartResponse, SearchResultsResponse,
-    ParameterSchema
+    ParameterSchema, PDFUploadResponse
 )
 from models import DBProject, DBDrugParameter
 from core.parsing_module import ParsingModule
@@ -138,6 +140,103 @@ async def start_search(
     
     except Exception as e:
         logger.error(f"Error in start_search: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post(
+    "/api/v1/upload/pdf",
+    response_model=PDFUploadResponse,
+    tags=["Upload"]
+)
+async def upload_pdf(
+    file: UploadFile = File(...),
+    inn_en: str = None,
+    inn_ru: str = None,
+    dosage: str = None,
+    form: str = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Upload a PDF file and extract drug parameters from it.
+    
+    Parameters are extracted using the same LLM process as PubMed abstracts.
+    
+    Query parameters:
+    - inn_en: Drug name in English (optional, but recommended)
+    - inn_ru: Drug name in Russian (optional)
+    - dosage: Drug dosage (optional)
+    - form: Drug form (optional)
+    """
+    try:
+        # Validate file is PDF
+        if not file.filename.lower().endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="File must be a PDF")
+        
+        # Use generic or provided drug name
+        drug_name = inn_en or "unknown drug"
+        
+        # Create project
+        project_id = str(uuid.uuid4())
+        project = DBProject(
+            project_id=project_id,
+            inn_en=inn_en or "Unknown",
+            inn_ru=inn_ru,
+            dosage=dosage or "Not specified",
+            form=form or "Not specified",
+            status="uploading"
+        )
+        db.add(project)
+        db.commit()
+        
+        logger.info(f"Created project {project_id} for PDF upload: {file.filename}")
+        
+        # Save uploaded file to temp location
+        temp_dir = tempfile.mkdtemp()
+        temp_pdf_path = Path(temp_dir) / file.filename
+        
+        try:
+            # Save file
+            with open(temp_pdf_path, "wb") as f:
+                content = await file.read()
+                f.write(content)
+            
+            logger.info(f"Saved uploaded PDF to {temp_pdf_path}")
+            
+            # Extract parameters
+            parser = ParsingModule(db)
+            result = parser.extract_from_pdf(project_id, str(temp_pdf_path), drug_name)
+            
+            parameters_found = len(result.get("parameters", []))
+            
+            if result.get("error"):
+                logger.error(f"Error extracting from PDF: {result['error']}")
+                project.status = "upload_failed"
+                db.commit()
+                
+                return PDFUploadResponse(
+                    project_id=project_id,
+                    status="upload_failed",
+                    message=f"Failed to extract parameters: {result['error']}",
+                    parameters_found=0
+                )
+            
+            return PDFUploadResponse(
+                project_id=project_id,
+                status="completed",
+                message=f"PDF processed successfully. {parameters_found} parameters extracted.",
+                parameters_found=parameters_found
+            )
+        
+        finally:
+            # Cleanup temp file
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup temp directory {temp_dir}: {e}")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in upload_pdf: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get(

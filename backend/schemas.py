@@ -51,3 +51,10 @@ class ErrorResponse(BaseModel):
     """Error response."""
     error: str
     details: Optional[str] = None
+
+class PDFUploadResponse(BaseModel):
+    """Response to PDF upload request."""
+    project_id: str
+    status: str
+    message: str
+    parameters_found: int

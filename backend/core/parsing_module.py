@@ -8,6 +8,7 @@ from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 from services.pubmed import PubMedClient
 from services.llm_client import YandexGPTClient
+from services.pdf_utils import PDFProcessor
 from models import DBProject, DBDrugParameter
 from datetime import datetime
 
@@ -158,6 +159,114 @@ class ParsingModule:
             "articles_processed": len(articles),
             "error": None
         }
+    
+    def extract_from_pdf(
+        self,
+        project_id: str,
+        pdf_path: str,
+        inn: str
+    ) -> Dict[str, Any]:
+        """
+        Extract parameters from a PDF file.
+        
+        Args:
+            project_id: Project UUID
+            pdf_path: Path to the PDF file
+            inn: Drug name
+        
+        Returns:
+            Dict with extraction results
+        """
+        try:
+            # Step 1: Extract text from PDF
+            logger.info(f"[{project_id}] Extracting text from PDF...")
+            processor = PDFProcessor()
+            pdf_text = processor.extract_text(pdf_path)
+            
+            if not pdf_text:
+                logger.warning(f"[{project_id}] No text extracted from PDF")
+                return {"error": "Failed to extract text from PDF", "parameters": []}
+            
+            # Step 2: Extract parameters via LLM
+            logger.info(f"[{project_id}] Extracting parameters from PDF text...")
+            params = self.llm.extract_parameters(pdf_text, inn)
+            
+            if not params:
+                logger.warning(f"[{project_id}] LLM returned no parameters")
+                return {"error": "No parameters extracted", "parameters": []}
+            
+            # Step 3: Save to database
+            logger.info(f"[{project_id}] Saving parameters to DB...")
+            aggregated_params = {}
+            
+            for param_name, param_data in params.items():
+                if param_data is None or not param_data.get("found"):
+                    continue
+                
+                if param_name not in aggregated_params:
+                    aggregated_params[param_name] = []
+                
+                aggregated_params[param_name].append({
+                    "value": param_data.get("value"),
+                    "unit": param_data.get("unit"),
+                    "pmid": None,
+                    "title": "Uploaded PDF"
+                })
+            
+            for param_name, values in aggregated_params.items():
+                for value_entry in values:
+                    db_param = DBDrugParameter(
+                        project_id=project_id,
+                        parameter=param_name,
+                        value=str(value_entry["value"]),
+                        unit=value_entry.get("unit"),
+                        source_pmid=None,  # PDF upload doesn't have PMID
+                        source_title="Uploaded PDF",
+                        is_reliable=True
+                    )
+                    self.db.add(db_param)
+            
+            self.db.commit()
+            
+            # Step 4: Update project status
+            project = self.db.query(DBProject).filter(
+                DBProject.project_id == project_id
+            ).first()
+            
+            if project:
+                project.status = "pdf_processed"
+                project.search_results = {
+                    "source": "PDF file",
+                    "parameters_found": {
+                        k: len(v) for k, v in aggregated_params.items()
+                    },
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                self.db.commit()
+            
+            logger.info(f"[{project_id}] PDF extraction completed successfully")
+            
+            # Return formatted results
+            parameters = []
+            for param_name, values in aggregated_params.items():
+                for value_entry in values:
+                    parameters.append({
+                        "parameter": param_name,
+                        "value": str(value_entry["value"]),
+                        "unit": value_entry.get("unit"),
+                        "source": "Uploaded PDF",
+                        "is_reliable": True
+                    })
+            
+            return {
+                "parameters": parameters,
+                "parameters_count": len(parameters),
+                "error": None
+            }
+        
+        except Exception as e:
+            logger.error(f"[{project_id}] Error in extract_from_pdf: {e}", exc_info=True)
+            return {"error": str(e), "parameters": []}
     
     def close(self):
         """Cleanup resources."""
