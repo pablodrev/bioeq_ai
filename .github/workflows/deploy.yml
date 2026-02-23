@@ -222,7 +222,7 @@ jobs:
             APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE up -d --remove-orphans --no-build --no-deps app"
 
             for i in $(seq 1 30); do
-              if curl -fsS http://127.0.0.1:8000/health >/dev/null; then
+              if curl -fsS http://127.0.0.1:8000/health >/dev/null || curl -fsS http://127.0.0.1:8000/api/v1/health >/dev/null; then
                 exit 0
               fi
               sleep 2
