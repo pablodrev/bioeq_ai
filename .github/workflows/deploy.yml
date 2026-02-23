@@ -48,7 +48,7 @@ jobs:
           MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
           QDRANT_URL: ${{ secrets.QDRANT_URL }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-          NGINX_PORT: ${{ secrets.NGINX_PORT }}
+          NGINX_PORT: 18081
         run: |
           set -euo pipefail
 
