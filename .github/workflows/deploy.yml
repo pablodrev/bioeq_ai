@@ -222,7 +222,7 @@ jobs:
             APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE up -d --remove-orphans --no-build --no-deps app"
 
             app_ready=0
-            for i in $(seq 1 30); do
+            for i in $(seq 1 60); do
               if curl -fsS http://127.0.0.1:8000/health >/dev/null || curl -fsS http://127.0.0.1:8000/api/v1/health >/dev/null; then
                 app_ready=1
                 break
@@ -237,27 +237,36 @@ jobs:
               exit 1
             fi
 
-            check_container_status() {
+            wait_container_ready() {
               name="$1"
-              state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)"
-              if [ "$state" != "running" ]; then
-                echo "Container $name is not running (state=$state)"
-                return 1
-              fi
+              timeout_seconds="${2:-120}"
+              last_state="unknown"
+              last_health="unknown"
 
-              health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$name" 2>/dev/null || echo unknown)"
-              if [ "$health" != "healthy" ] && [ "$health" != "none" ]; then
-                echo "Container $name failed health check (health=$health)"
-                return 1
-              fi
+              for _ in $(seq 1 "$timeout_seconds"); do
+                last_state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)"
+                last_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$name" 2>/dev/null || echo unknown)"
 
-              echo "Container $name is OK (state=$state, health=$health)"
-              return 0
+                if [ "$last_state" = "running" ] && { [ "$last_health" = "healthy" ] || [ "$last_health" = "none" ]; }; then
+                  echo "Container $name is OK (state=$last_state, health=$last_health)"
+                  return 0
+                fi
+
+                if [ "$last_state" = "exited" ] || [ "$last_state" = "dead" ] || [ "$last_health" = "unhealthy" ]; then
+                  echo "Container $name is not ready (state=$last_state, health=$last_health)"
+                  return 1
+                fi
+
+                sleep 2
+              done
+
+              echo "Container $name readiness timeout (state=$last_state, health=$last_health)"
+              return 1
             }
 
             check_failed=0
             for container in bioeq-ai-app bioeq-ai-redis bioeq-ai-postgres bioeq-ai-qdrant bioeq-ai-minio; do
-              if ! check_container_status "$container"; then
+              if ! wait_container_ready "$container" 120; then
                 check_failed=1
               fi
             done
@@ -406,7 +415,7 @@ jobs:
             FRONTEND_IMAGE="$FRONTEND_IMAGE:$FRONTEND_IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE up -d --remove-orphans --no-build --no-deps frontend nginx"
 
             frontend_ready=0
-            for i in $(seq 1 30); do
+            for i in $(seq 1 60); do
               status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' bioeq-ai-frontend 2>/dev/null || true)"
               if [ "$status" = "healthy" ]; then
                 frontend_ready=1
@@ -422,27 +431,36 @@ jobs:
               exit 1
             fi
 
-            check_container_status() {
+            wait_container_ready() {
               name="$1"
-              state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)"
-              if [ "$state" != "running" ]; then
-                echo "Container $name is not running (state=$state)"
-                return 1
-              fi
+              timeout_seconds="${2:-120}"
+              last_state="unknown"
+              last_health="unknown"
 
-              health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$name" 2>/dev/null || echo unknown)"
-              if [ "$health" != "healthy" ] && [ "$health" != "none" ]; then
-                echo "Container $name failed health check (health=$health)"
-                return 1
-              fi
+              for _ in $(seq 1 "$timeout_seconds"); do
+                last_state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)"
+                last_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$name" 2>/dev/null || echo unknown)"
 
-              echo "Container $name is OK (state=$state, health=$health)"
-              return 0
+                if [ "$last_state" = "running" ] && { [ "$last_health" = "healthy" ] || [ "$last_health" = "none" ]; }; then
+                  echo "Container $name is OK (state=$last_state, health=$last_health)"
+                  return 0
+                fi
+
+                if [ "$last_state" = "exited" ] || [ "$last_state" = "dead" ] || [ "$last_health" = "unhealthy" ]; then
+                  echo "Container $name is not ready (state=$last_state, health=$last_health)"
+                  return 1
+                fi
+
+                sleep 2
+              done
+
+              echo "Container $name readiness timeout (state=$last_state, health=$last_health)"
+              return 1
             }
 
             check_failed=0
             for container in bioeq-ai-frontend bioeq-ai-nginx bioeq-ai-app; do
-              if ! check_container_status "$container"; then
+              if ! wait_container_ready "$container" 120; then
                 check_failed=1
               fi
             done
