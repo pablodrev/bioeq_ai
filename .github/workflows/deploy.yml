@@ -221,17 +221,55 @@ jobs:
             docker ps -aq --filter "name=bioeq-ai-app" | xargs -r docker rm -f >/dev/null 2>&1 || true
             APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE up -d --remove-orphans --no-build --no-deps app"
 
+            app_ready=0
             for i in $(seq 1 30); do
               if curl -fsS http://127.0.0.1:8000/health >/dev/null || curl -fsS http://127.0.0.1:8000/api/v1/health >/dev/null; then
-                exit 0
+                app_ready=1
+                break
               fi
               sleep 2
             done
 
-            echo "Deploy health check failed on server"
-            APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE ps"
-            docker logs --tail 100 bioeq-ai-app || true
-            exit 1
+            if [ "$app_ready" -ne 1 ]; then
+              echo "Deploy health check failed on server"
+              APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE ps"
+              docker logs --tail 100 bioeq-ai-app || true
+              exit 1
+            fi
+
+            check_container_status() {
+              name="$1"
+              state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)"
+              if [ "$state" != "running" ]; then
+                echo "Container $name is not running (state=$state)"
+                return 1
+              fi
+
+              health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$name" 2>/dev/null || echo unknown)"
+              if [ "$health" != "healthy" ] && [ "$health" != "none" ]; then
+                echo "Container $name failed health check (health=$health)"
+                return 1
+              fi
+
+              echo "Container $name is OK (state=$state, health=$health)"
+              return 0
+            }
+
+            check_failed=0
+            for container in bioeq-ai-app bioeq-ai-redis bioeq-ai-postgres bioeq-ai-qdrant bioeq-ai-minio; do
+              if ! check_container_status "$container"; then
+                check_failed=1
+              fi
+            done
+
+            if [ "$check_failed" -ne 0 ]; then
+              echo "Post-deploy container verification failed"
+              APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE ps"
+              for container in bioeq-ai-app bioeq-ai-redis bioeq-ai-postgres bioeq-ai-qdrant bioeq-ai-minio; do
+                docker logs --tail 100 "$container" || true
+              done
+              exit 1
+            fi
 
   frontend_quality:
     runs-on: ubuntu-latest
@@ -367,15 +405,53 @@ jobs:
             docker ps -aq --filter "name=bioeq-ai-frontend" | xargs -r docker rm -f >/dev/null 2>&1 || true
             FRONTEND_IMAGE="$FRONTEND_IMAGE:$FRONTEND_IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE up -d --remove-orphans --no-build --no-deps frontend nginx"
 
+            frontend_ready=0
             for i in $(seq 1 30); do
               status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' bioeq-ai-frontend 2>/dev/null || true)"
               if [ "$status" = "healthy" ]; then
-                exit 0
+                frontend_ready=1
+                break
               fi
               sleep 2
             done
 
-            echo "Frontend deploy health check failed on server"
-            FRONTEND_IMAGE="$FRONTEND_IMAGE:$FRONTEND_IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE ps"
-            docker logs --tail 100 bioeq-ai-frontend || true
-            exit 1
+            if [ "$frontend_ready" -ne 1 ]; then
+              echo "Frontend deploy health check failed on server"
+              FRONTEND_IMAGE="$FRONTEND_IMAGE:$FRONTEND_IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE ps"
+              docker logs --tail 100 bioeq-ai-frontend || true
+              exit 1
+            fi
+
+            check_container_status() {
+              name="$1"
+              state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)"
+              if [ "$state" != "running" ]; then
+                echo "Container $name is not running (state=$state)"
+                return 1
+              fi
+
+              health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$name" 2>/dev/null || echo unknown)"
+              if [ "$health" != "healthy" ] && [ "$health" != "none" ]; then
+                echo "Container $name failed health check (health=$health)"
+                return 1
+              fi
+
+              echo "Container $name is OK (state=$state, health=$health)"
+              return 0
+            }
+
+            check_failed=0
+            for container in bioeq-ai-frontend bioeq-ai-nginx bioeq-ai-app; do
+              if ! check_container_status "$container"; then
+                check_failed=1
+              fi
+            done
+
+            if [ "$check_failed" -ne 0 ]; then
+              echo "Post-deploy container verification failed"
+              FRONTEND_IMAGE="$FRONTEND_IMAGE:$FRONTEND_IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE ps"
+              for container in bioeq-ai-frontend bioeq-ai-nginx bioeq-ai-app; do
+                docker logs --tail 100 "$container" || true
+              done
+              exit 1
+            fi
