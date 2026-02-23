@@ -1,6 +1,28 @@
 # Основной стек приложения и инфраструктурных сервисов
 services:
-  # Приложение (main.py)
+  # Health-check приложение
+  health:
+    build:
+      context: .
+      dockerfile: Dockerfile.health
+    image: ${APP_IMAGE:-bioeq-ai-health:local}
+    container_name: bioeq-ai-health
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8001:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      minio:
+        condition: service_started
+
+  # Основное приложение (backend)
   app:
     build:
       context: .
