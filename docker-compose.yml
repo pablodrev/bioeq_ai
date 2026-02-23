@@ -34,6 +34,11 @@ services:
       - .env
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       redis:
         condition: service_healthy
@@ -51,6 +56,8 @@ services:
     restart: unless-stopped
     depends_on:
       app:
+        condition: service_started
+      frontend:
         condition: service_started
     ports:
       - "${NGINX_PORT:-18080}:80"
@@ -119,6 +126,24 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
+
+  # Frontend (static built app)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: ${FRONTEND_IMAGE:-bioeq-ai-frontend:local}
+    container_name: bioeq-ai-frontend
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "18080:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 # Именованные тома для персистентного хранения данных
 volumes:
