@@ -220,3 +220,15 @@ jobs:
             docker ps -aq --filter "name=bioeq-ai-app" | xargs -r docker rm -f >/dev/null 2>&1 || true
             docker ps -aq --filter "name=bioeq-ai-nginx" | xargs -r docker rm -f >/dev/null 2>&1 || true
             APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE up -d --remove-orphans --no-build app nginx"
+
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:8000/health >/dev/null; then
+                exit 0
+              fi
+              sleep 2
+            done
+
+            echo "Deploy health check failed on server"
+            APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE ps"
+            docker logs --tail 100 bioeq-ai-app || true
+            exit 1
