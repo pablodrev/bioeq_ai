@@ -29,6 +29,7 @@ class YandexGPTClient:
         """
         Extract pharmacokinetic parameters from abstract text using LLM.
         Returns dict with parameters: {parameter: value, ...}
+        Enforces strict standard units of measurement.
         """
         
         # Validate credentials
@@ -36,36 +37,46 @@ class YandexGPTClient:
             logger.error(f"Missing credentials: api_key={bool(self.api_key)}, folder_id={bool(self.folder_id)}")
             return {}
         
-        system_prompt = f"""Ты — опытный клинический фармаколог-регулятор ЕАЭС.
-Твоя задача — извлечь из научного текста фармакокинетические параметры для препарата {inn}.
+        system_prompt = f"""You are an expert clinical pharmacologist and regulatory affairs specialist.
+Your task is to extract pharmacokinetic parameters for the drug {inn} from scientific research papers.
 
-Нам нужны следующие параметры (если найдены в тексте):
-1. Cmax - максимальная концентрация (мг/л или нг/мл)
-2. AUC - площадь под кривой (мг*ч/л или нг*ч/мл)
-3. Tmax - время достижения Cmax (часы)
-4. T1/2 - период полувыведения (часы)
-5. CV_intra - ВНУТРИИНДИВИДУАЛЬНАЯ вариабельность в процентах (не межиндивидуальная!)
+STANDARD UNITS (STRICT - always use these units):
+- Cmax: ng/mL (nanograms per milliliter) - CONVERT all values to this unit
+- AUC: ng·h/mL (nanogram-hours per milliliter) - CONVERT all values to this unit
+- Tmax: h (hours) - CONVERT all values to this unit
+- T1/2: h (hours) - CONVERT all values to this unit
+- CV_intra: % (percent) - ALWAYS use percent, NOT decimal (e.g., 15.5 not 0.155)
 
-ВАЖНО:
-- Нам нужна именно INTRA-individual variability, а не INTER-individual
-- Приоритет - исследования на ЗДОРОВЫХ ДОБРОВОЛЬЦАХ (healthy volunteers)
-- Если параметра нет в тексте - верни null
+EXTRACTION RULES:
+1. Extract INTRA-individual variability (CV_intra) ONLY - NOT inter-individual variability
+2. Prioritize data from studies in HEALTHY VOLUNTEERS
+3. When multiple units are reported in the paper, CONVERT to standard units using standard conversion factors:
+   - mg/L = ng/mL × 1 (1 mg/L = 1000 ng/mL)
+   - μg/mL = ng/mL × 1000
+   - If the original unit cannot be converted to standard units, DO NOT report that parameter
+4. Include a "converted" flag if unit conversion was performed
+5. If a parameter is not found in the text, return null for that parameter
 
-Ответь ТОЛЬКО валидным JSON, без дополнительного текста:
+RESPONSE FORMAT (strict JSON only):
 {{
-  "Cmax": {{"value": число, "unit": "мг/л", "found": true}},
-  "AUC": {{"value": число, "unit": "мг*ч/л", "found": true}},
-  "Tmax": {{"value": число, "unit": "ч", "found": true}},
-  "T1/2": {{"value": число, "unit": "ч", "found": true}},
-  "CV_intra": {{"value": число, "unit": "%", "found": true}}
+  "Cmax": {{"value": <number>, "unit": "ng/mL", "found": true, "converted": false}},
+  "AUC": {{"value": <number>, "unit": "ng·h/mL", "found": true, "converted": false}},
+  "Tmax": {{"value": <number>, "unit": "h", "found": true, "converted": false}},
+  "T1/2": {{"value": <number>, "unit": "h", "found": true, "converted": false}},
+  "CV_intra": {{"value": <number>, "unit": "%", "found": true, "converted": false}}
 }}
-Если параметра нет - вместо объекта укажи null.
+
+IMPORTANT:
+- Return ONLY valid JSON, no additional text
+- Use null for parameters not found (not absence from JSON)
+- All units in response MUST be the standard units specified above
+- Do NOT include any explanation or markdown code blocks
 """
         
-        user_message = f"Вот текст из научной статьи:\n\n{abstract_text}\n\nИзвлеки параметры."
+        user_message = f"Extract pharmacokinetic parameters from this scientific paper abstract:\n\n{abstract_text}"
         
         payload = {
-            "modelUri": f"gpt://{self.folder_id}/yandexgpt-lite",
+            "modelUri": f"gpt://{self.folder_id}/aliceai-llm/latest",
             "completionOptions": {
                 "stream": False,
                 "temperature": 0.1,  # Low temperature for consistency

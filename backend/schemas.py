@@ -11,6 +11,10 @@ class SearchStartRequest(BaseModel):
     inn_ru: Optional[str] = Field(None, description="Drug name in Russian")
     dosage: str = Field(..., description="Drug dosage (e.g., '400mg')")
     form: str = Field(..., description="Drug form (e.g., 'tablets')")
+    additional_substances: Optional[List[str]] = Field(
+        None,
+        description="Optional list of additional substances to include in search query"
+    )
 
 class ParameterSchema(BaseModel):
     """Individual drug parameter from literature."""

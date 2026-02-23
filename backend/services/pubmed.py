@@ -5,6 +5,7 @@ import httpx
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Optional
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +14,8 @@ class PubMedClient:
     
     BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
     EMAIL = "pharma.mvp@gmail.com"  # Required by NCBI
+    MAX_RETRIES = 3
+    RETRY_DELAY = 2  # seconds
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key
@@ -20,16 +23,32 @@ class PubMedClient:
     
     def search(
         self,
-        inn: str,
+        substances,
         max_results: int = 5,
         sort: str = "relevance"
     ) -> List[str]:
         """
         Search PubMed for articles about drug pharmacokinetics.
+        Can accept either a single substance string or list of substances.
+        First substance is treated as mandatory (main INN).
+        Additional substances are optional filters.
         Returns list of PMIDs (PubMed IDs).
         """
-        # Build search query
-        query = f"{inn} AND (pharmacokinetics OR bioequivalence OR bioavailability) AND healthy"
+        # Normalize input to list
+        if isinstance(substances, str):
+            substances = [substances]
+        
+        # Build search query with main substance mandatory and additional substances optional
+        if len(substances) == 1:
+            # Basic search: just main substance
+            main_substance = substances[0]
+            query = f'"{main_substance}" AND (pharmacokinetics OR bioequivalence OR bioavailability) AND healthy'
+        else:
+            # Advanced search: main substance mandatory, additional substances optional
+            main_substance = substances[0]
+            additional = substances[1:]
+            additional_query = " OR ".join(additional)
+            query = f'"{main_substance}" AND ({additional_query}) AND (pharmacokinetics OR bioequivalence OR bioavailability) AND healthy'
         
         params = {
             "db": "pubmed",
@@ -43,20 +62,34 @@ class PubMedClient:
         if self.api_key:
             params["api_key"] = self.api_key
         
-        try:
-            response = self.client.get(f"{self.BASE_URL}/esearch.fcgi", params=params)
-            response.raise_for_status()
+        # Retry logic for transient failures
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                response = self.client.get(f"{self.BASE_URL}/esearch.fcgi", params=params)
+                response.raise_for_status()
+                
+                # Parse JSON response
+                data = response.json()
+                pmids = data.get("esearchresult", {}).get("idlist", [])
+                
+                logger.info(f"PubMed search for '{main_substance}': found {len(pmids)} articles")
+                return pmids
             
-            # Parse JSON response
-            data = response.json()
-            pmids = data.get("esearchresult", {}).get("idlist", [])
+            except (httpx.ConnectError, httpx.TimeoutException, OSError) as e:
+                logger.warning(f"PubMed search attempt {attempt + 1}/{self.MAX_RETRIES} failed: {e}")
+                if attempt < self.MAX_RETRIES - 1:
+                    wait_time = self.RETRY_DELAY * (2 ** attempt)  # exponential backoff
+                    logger.info(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"PubMed search error after {self.MAX_RETRIES} attempts: {e}")
+                    return []
             
-            logger.info(f"PubMed search for '{inn}': found {len(pmids)} articles")
-            return pmids
+            except Exception as e:
+                logger.error(f"PubMed search error: {e}")
+                return []
         
-        except Exception as e:
-            logger.error(f"PubMed search error: {e}")
-            return []
+        return []
     
     def fetch_abstracts(self, pmids: List[str]) -> List[Dict[str, str]]:
         """
@@ -78,49 +111,63 @@ class PubMedClient:
         if self.api_key:
             params["api_key"] = self.api_key
         
-        try:
-            response = self.client.get(f"{self.BASE_URL}/efetch.fcgi", params=params)
-            response.raise_for_status()
-            
-            text = response.text
-            if not text:
-                logger.error("Empty response from PubMed efetch")
-                return []
-
+        # Retry logic for transient failures
+        for attempt in range(self.MAX_RETRIES):
             try:
-                root = ET.fromstring(text)
-            except ET.ParseError as pe:
-                logger.error(f"Failed parsing PubMed XML: {pe}")
+                response = self.client.get(f"{self.BASE_URL}/efetch.fcgi", params=params)
+                response.raise_for_status()
+                
+                text = response.text
+                if not text:
+                    logger.error("Empty response from PubMed efetch")
+                    return []
+
+                try:
+                    root = ET.fromstring(text)
+                except ET.ParseError as pe:
+                    logger.error(f"Failed parsing PubMed XML: {pe}")
+                    return []
+
+                results: List[Dict[str, str]] = []
+                # Iterate over PubmedArticle elements
+                for article in root.findall('.//PubmedArticle'):
+                    pmid = article.findtext('.//MedlineCitation/PMID') or ""
+                    title = article.findtext('.//Article/ArticleTitle') or ""
+
+                    # Collect abstract text parts
+                    abstract_parts: List[str] = []
+                    for at in article.findall('.//Article/Abstract/AbstractText'):
+                        # AbstractText may contain nested text or attribution
+                        part_text = ''.join(at.itertext()).strip()
+                        if part_text:
+                            abstract_parts.append(part_text)
+
+                    abstract = " ".join(abstract_parts)
+
+                    results.append({
+                        "pmid": pmid,
+                        "title": title,
+                        "abstract": abstract,
+                    })
+
+                logger.info(f"Fetched {len(results)} abstracts")
+                return results
+            
+            except (httpx.ConnectError, httpx.TimeoutException, OSError) as e:
+                logger.warning(f"PubMed fetch attempt {attempt + 1}/{self.MAX_RETRIES} failed: {e}")
+                if attempt < self.MAX_RETRIES - 1:
+                    wait_time = self.RETRY_DELAY * (2 ** attempt)  # exponential backoff
+                    logger.info(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"PubMed fetch error after {self.MAX_RETRIES} attempts: {e}")
+                    return []
+            
+            except Exception as e:
+                logger.error(f"PubMed fetch error: {e}")
                 return []
-
-            results: List[Dict[str, str]] = []
-            # Iterate over PubmedArticle elements
-            for article in root.findall('.//PubmedArticle'):
-                pmid = article.findtext('.//MedlineCitation/PMID') or ""
-                title = article.findtext('.//Article/ArticleTitle') or ""
-
-                # Collect abstract text parts
-                abstract_parts: List[str] = []
-                for at in article.findall('.//Article/Abstract/AbstractText'):
-                    # AbstractText may contain nested text or attribution
-                    part_text = ''.join(at.itertext()).strip()
-                    if part_text:
-                        abstract_parts.append(part_text)
-
-                abstract = " ".join(abstract_parts)
-
-                results.append({
-                    "pmid": pmid,
-                    "title": title,
-                    "abstract": abstract,
-                })
-
-            logger.info(f"Fetched {len(results)} abstracts")
-            return results
         
-        except Exception as e:
-            logger.error(f"PubMed fetch error: {e}")
-            return []
+        return []
     
     def close(self):
         """Close HTTP client."""

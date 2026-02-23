@@ -28,7 +28,8 @@ class ParsingModule:
         self,
         project_id: str,
         inn: str,
-        max_articles: int = 5
+        max_articles: int = 5,
+        additional_substances: List[str] = None
     ) -> Dict[str, Any]:
         """
         Full workflow: search PubMed -> extract params via LLM -> save to DB.
@@ -37,6 +38,7 @@ class ParsingModule:
             project_id: Project UUID
             inn: Drug name in English
             max_articles: Max articles to process
+            additional_substances: Optional list of additional substances to include in search
         
         Returns:
             Dict with aggregated results
@@ -45,7 +47,11 @@ class ParsingModule:
         try:
             # Step 1: Search PubMed
             logger.info(f"[{project_id}] Searching PubMed for '{inn}'...")
-            pmids = self.pubmed.search(inn, max_results=max_articles)
+            substances = [inn]
+            if additional_substances:
+                substances.extend(additional_substances)
+                logger.info(f"[{project_id}] Including additional substances: {additional_substances}")
+            pmids = self.pubmed.search(substances, max_results=max_articles)
             
             if not pmids:
                 logger.warning(f"[{project_id}] No articles found for '{inn}'")

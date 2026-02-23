@@ -126,7 +126,8 @@ async def start_search(
         background_tasks.add_task(
             _run_full_pipeline,
             project_id=project_id,
-            inn=request.inn_en
+            inn=request.inn_en,
+            additional_substances=request.additional_substances
         )
         
         return SearchStartResponse(
@@ -316,7 +317,7 @@ async def download_report(
 # BACKGROUND TASKS
 # ============================================================================
 
-def _run_full_pipeline(project_id: str, inn: str):
+def _run_full_pipeline(project_id: str, inn: str, additional_substances: list = None):
     """
     Full pipeline: search -> design -> regulatory check -> report.
     Runs as background task.
@@ -332,7 +333,10 @@ def _run_full_pipeline(project_id: str, inn: str):
         # Step 1: Search and extract parameters
         logger.info(f"[{project_id}] Step 1: Searching PubMed...")
         parser = ParsingModule(db)
-        search_results = parser.search_and_extract(project_id, inn, max_articles=10)
+        search_results = parser.search_and_extract(
+            project_id, inn, max_articles=10,
+            additional_substances=additional_substances
+        )
         
         if search_results.get("error"):
             logger.warning(f"[{project_id}] Search error: {search_results['error']}")
