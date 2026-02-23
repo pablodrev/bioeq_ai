@@ -20,7 +20,7 @@ def _get_json_with_retry(url: str, retries: int = 10, delay_seconds: float = 0.5
 
 
 def test_api_health_endpoint() -> None:
-    data = _get_json_with_retry("http://localhost:8000/health")
+    data = _get_json_with_retry("http://localhost:8001/health")
 
     assert data["status"] == "ok"
     assert data["services"]["server"]["status"] == "ok"
@@ -32,11 +32,11 @@ def test_api_health_endpoint() -> None:
 
 def test_api_service_health_endpoints() -> None:
     endpoints = [
-        "http://localhost:8000/health/server",
-        "http://localhost:8000/health/redis",
-        "http://localhost:8000/health/postgres",
-        "http://localhost:8000/health/minio",
-        "http://localhost:8000/health/qdrant",
+        "http://localhost:8001/health/server",
+        "http://localhost:8001/health/redis",
+        "http://localhost:8001/health/postgres",
+        "http://localhost:8001/health/minio",
+        "http://localhost:8001/health/qdrant",
     ]
 
     for endpoint in endpoints:
