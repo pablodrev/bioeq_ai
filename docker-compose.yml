@@ -52,6 +52,8 @@ services:
     depends_on:
       app:
         condition: service_started
+      frontend:
+        condition: service_started
     ports:
       - "${NGINX_PORT:-18080}:80"
     volumes:
@@ -119,6 +121,17 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
+
+  # Frontend (static built app)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: ${FRONTEND_IMAGE:-bioeq-ai-frontend:local}
+    container_name: bioeq-ai-frontend
+    restart: unless-stopped
+    depends_on:
+      - app
 
 # Именованные тома для персистентного хранения данных
 volumes:
