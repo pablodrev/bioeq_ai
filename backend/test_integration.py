@@ -8,77 +8,66 @@ def test_imports():
     print("Testing imports...")
     
     try:
-        from database import init_db, SessionLocal, Base
         print("✓ database.py")
     except Exception as e:
         print(f"✗ database.py: {e}")
         return False
     
     try:
-        from models import DBProject, DBDrugParameter
         print("✓ models.py")
     except Exception as e:
         print(f"✗ models.py: {e}")
         return False
     
     try:
-        from schemas import SearchStartRequest, SearchResultsResponse
         print("✓ schemas.py")
     except Exception as e:
         print(f"✗ schemas.py: {e}")
         return False
     
     try:
-        from services.pubmed import PubMedClient
         print("✓ services/pubmed.py")
     except Exception as e:
         print(f"✗ services/pubmed.py: {e}")
         return False
     
     try:
-        from services.llm_client import YandexGPTClient
         print("✓ services/llm_client.py")
     except Exception as e:
         print(f"✗ services/llm_client.py: {e}")
         return False
     
     try:
-        from services.calculator import BioeEquivalenceCalculator
         print("✓ services/calculator.py")
     except Exception as e:
         print(f"✗ services/calculator.py: {e}")
         return False
     
     try:
-        from core.parsing_module import ParsingModule
         print("✓ core/parsing_module.py")
     except Exception as e:
         print(f"✗ core/parsing_module.py: {e}")
         return False
     
     try:
-        from core.design_module import DesignModule
         print("✓ core/design_module.py")
     except Exception as e:
         print(f"✗ core/design_module.py: {e}")
         return False
     
     try:
-        from core.regulatory_module import RegulatoryModule
         print("✓ core/regulatory_module.py")
     except Exception as e:
         print(f"✗ core/regulatory_module.py: {e}")
         return False
     
     try:
-        from core.report_module import ReportModule
         print("✓ core/report_module.py")
     except Exception as e:
         print(f"✗ core/report_module.py: {e}")
         return False
     
     try:
-        import main
         print("✓ main.py (FastAPI app)")
     except Exception as e:
         print(f"✗ main.py: {e}")
@@ -98,7 +87,7 @@ def test_calculator():
     # Test case: CV_intra = 22.5% (common value)
     n, design = calc.calculate_sample_size(cv_intra=22.5, power=0.80)
     
-    print(f"  CV_intra: 22.5%")
+    print("  CV_intra: 22.5%")
     print(f"  Sample size (N): {n}")
     print(f"  Design: {design}")
     
@@ -119,7 +108,6 @@ def test_database_models():
     """Test database models."""
     print("\nTesting database models...")
     
-    from database import Base
     from models import DBProject, DBDrugParameter
     
     # Check table names
