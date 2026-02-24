@@ -159,6 +159,66 @@ class ParsingModule:
             extracted = self._extract_params_from_article(article, inn, target_only_cv=True)
             self._merge_aggregated(aggregated, extracted)
         return aggregated
+
+    def _extract_missing_cv_intra_from_fulltext(
+        self,
+        inn: str,
+        candidate_pmids: List[str]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Final retrieval pass: fetch PMC full texts and extract CV_intra from relevant snippets.
+        """
+        if not candidate_pmids:
+            return {}
+
+        pmid_to_pmcid = self.pubmed.map_pmids_to_pmcids(candidate_pmids)
+        if not pmid_to_pmcid:
+            return {}
+
+        fulltexts = self.pubmed.fetch_pmc_fulltexts(pmid_to_pmcid)
+        if not fulltexts:
+            return {}
+
+        aggregated: Dict[str, List[Dict[str, Any]]] = {}
+        focus_tokens = (
+            "intra-subject", "within-subject", "intrasubject", "withinsubject",
+            "coefficient of variation", "variability", "bioequivalence", "crossover"
+        )
+
+        for pmid, full_text in fulltexts.items():
+            text = full_text or ""
+            text_lower = text.lower()
+            candidate_windows: List[str] = []
+
+            for token in focus_tokens:
+                idx = text_lower.find(token)
+                if idx == -1:
+                    continue
+                start = max(0, idx - 800)
+                end = min(len(text), idx + 2200)
+                window = text[start:end]
+                if window and window not in candidate_windows:
+                    candidate_windows.append(window)
+
+            # Fall back to head chunk if no explicit marker found
+            if not candidate_windows and text:
+                candidate_windows.append(text[:3000])
+
+            for snippet in candidate_windows[:3]:
+                params = self.llm.extract_cv_intra(snippet, inn)
+                cv = params.get("CV_intra") if isinstance(params, dict) else None
+                if not self._is_valid_extracted_param(cv):
+                    continue
+                aggregated.setdefault("CV_intra", []).append({
+                    "value": cv.get("value"),
+                    "unit": cv.get("unit"),
+                    "pmid": pmid,
+                    "title": "PMC full text",
+                })
+                # One good hit per article is enough
+                break
+
+        return aggregated
     
     def search_and_extract(
         self,
@@ -224,6 +284,15 @@ class ParsingModule:
                     already_seen_pmids=processed_pmids,
                 )
                 self._merge_aggregated(aggregated_params, cv_only)
+
+            # Step 3c: final full-text retrieval pass via PMC when abstract passes failed
+            if "CV_intra" not in aggregated_params:
+                logger.info(f"[{project_id}] CV_intra still missing. Running PMC full-text retrieval pass...")
+                cv_from_fulltext = self._extract_missing_cv_intra_from_fulltext(
+                    inn=inn,
+                    candidate_pmids=list(processed_pmids),
+                )
+                self._merge_aggregated(aggregated_params, cv_from_fulltext)
             
             # Step 4: Save to database
             logger.info(f"[{project_id}] Saving {len(aggregated_params)} parameter types to DB...")
