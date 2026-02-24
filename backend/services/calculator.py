@@ -106,3 +106,42 @@ class BioeEquivalenceCalculator:
             "post_dose_late_2": tmax + t_half * 3,
             "post_dose_late_3": tmax + t_half * 5,
         }
+    
+    @staticmethod
+    def calculate_recruitment_sample_size(
+        sample_size: int,
+        dropout_rate: float = 0.0,
+        screen_fail_rate: float = 0.0
+    ) -> int:
+        """
+        Adjust sample size for dropout and screen failure rates.
+        
+        Args:
+            sample_size: Required evaluable sample size
+            dropout_rate: Expected dropout rate as percentage (0-100)
+            screen_fail_rate: Expected screen failure rate as percentage (0-100)
+        
+        Returns:
+            Adjusted recruitment sample size
+        """
+        if dropout_rate < 0 or dropout_rate > 100:
+            raise ValueError("dropout_rate must be between 0 and 100")
+        if screen_fail_rate < 0 or screen_fail_rate > 100:
+            raise ValueError("screen_fail_rate must be between 0 and 100")
+        
+        # Convert percentages to decimals
+        dropout_decimal = dropout_rate / 100
+        screen_fail_decimal = screen_fail_rate / 100
+        
+        # Calculate adjustment factor
+        # recruitment_needed = evaluable / ((1 - dropout) * (1 - screen_fail))
+        adjustment_factor = (1 - dropout_decimal) * (1 - screen_fail_decimal)
+        
+        if adjustment_factor <= 0:
+            raise ValueError("dropout_rate + screen_fail_rate cannot equal or exceed 100%")
+        
+        # Calculate recruitment size (round up)
+        recruitment_size = int(math.ceil(sample_size / adjustment_factor))
+        
+        return recruitment_size
+

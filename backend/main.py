@@ -18,7 +18,8 @@ import shutil
 from database import SessionLocal, init_db, get_db
 from schemas import (
     SearchStartRequest, SearchStartResponse, SearchResultsResponse,
-    ParameterSchema, PDFUploadResponse
+    ParameterSchema, PDFUploadResponse, DesignCalculateRequest, 
+    DesignResultResponse, CriticalParametersResponse, SamplingPlanResponse
 )
 from models import DBProject, DBDrugParameter
 from core.parsing_module import ParsingModule
@@ -329,6 +330,198 @@ async def get_project_details(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post(
+    "/api/v1/design/calculate",
+    response_model=DesignResultResponse,
+    tags=["Design"]
+)
+async def calculate_design(
+    request: DesignCalculateRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Calculate study design parameters based on drug pharmacokinetic parameters.
+    
+    This endpoint calculates design parameters with adjustment for dropout and screen failure rates.
+    If project_id is provided, results are stored to the project database.
+    
+    Parameters:
+    - cv_intra: Required. Intra-individual coefficient of variation (%)
+    - tmax: Optional. Time to maximum concentration (hours)
+    - t_half: Optional. Terminal half-life (hours)
+    - power: Statistical power (default 0.80)
+    - alpha: Significance level (default 0.05)
+    - dropout_rate: Expected dropout rate % (default 0.0)
+    - screen_fail_rate: Expected screen failure rate % (default 0.0)
+    - project_id: Optional. Project UUID to store results
+    """
+    try:
+        from services.calculator import BioeEquivalenceCalculator
+        
+        logger.info(f"Calculating design with CV_intra={request.cv_intra}%, dropout={request.dropout_rate}%, screen_fail={request.screen_fail_rate}%")
+        
+        calc = BioeEquivalenceCalculator()
+        
+        # Calculate sample size
+        sample_size, design_type = calc.calculate_sample_size(
+            cv_intra=request.cv_intra,
+            power=request.power,
+            alpha=request.alpha
+        )
+        
+        # Adjust for dropout and screen failure
+        recruitment_size = calc.calculate_recruitment_sample_size(
+            sample_size=sample_size,
+            dropout_rate=request.dropout_rate,
+            screen_fail_rate=request.screen_fail_rate
+        )
+        
+        # Calculate washout period if half-life provided
+        washout_days = None
+        if request.t_half:
+            washout_days = calc.estimate_washout_period(request.t_half)
+        
+        # Estimate blood sampling plan if both Tmax and T1/2 provided
+        sampling_plan_dict = None
+        if request.tmax and request.t_half:
+            sampling_plan_dict = calc.estimate_blood_sampling(
+                request.tmax, 
+                request.t_half
+            )
+        
+        # Prepare response
+        critical_params = CriticalParametersResponse(
+            cv_intra=request.cv_intra,
+            tmax=request.tmax,
+            t_half=request.t_half
+        )
+        
+        sampling_plan = None
+        if sampling_plan_dict:
+            sampling_plan = SamplingPlanResponse(**sampling_plan_dict)
+        
+        result = DesignResultResponse(
+            sample_size=sample_size,
+            recruitment_size=recruitment_size,
+            design_type=design_type,
+            cv_intra=request.cv_intra,
+            power=request.power,
+            alpha=request.alpha,
+            dropout_rate=request.dropout_rate,
+            screen_fail_rate=request.screen_fail_rate,
+            washout_days=washout_days,
+            critical_parameters=critical_params,
+            sampling_plan=sampling_plan
+        )
+        
+        # Save calculations to project if project_id is provided
+        if request.project_id:
+            project = db.query(DBProject).filter(
+                DBProject.project_id == request.project_id
+            ).first()
+            
+            if project:
+                project.design_parameters = {
+                    "sample_size": sample_size,
+                    "recruitment_size": recruitment_size,
+                    "design_type": design_type,
+                    "cv_intra": request.cv_intra,
+                    "power": request.power,
+                    "alpha": request.alpha,
+                    "dropout_rate": request.dropout_rate,
+                    "screen_fail_rate": request.screen_fail_rate,
+                    "washout_days": washout_days,
+                    "critical_parameters": {
+                        "CV_intra": request.cv_intra,
+                        "Tmax": request.tmax,
+                        "T1/2": request.t_half,
+                    },
+                    "sampling_plan": sampling_plan_dict
+                }
+                db.commit()
+                logger.info(f"Design results saved to project {request.project_id}")
+        
+        logger.info(f"Design calculated: n={sample_size}, recruitment_n={recruitment_size}, type={design_type}")
+        return result
+    
+    except ValueError as e:
+        logger.error(f"Validation error in calculate_design: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error in calculate_design: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/api/v1/design/{project_id}",
+    response_model=DesignResultResponse,
+    tags=["Design"]
+)
+async def get_design_results(
+    project_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get calculated design results for a specific project.
+    
+    Retrieves previously calculated design parameters from the database.
+    These results are used when generating the project report.
+    """
+    try:
+        logger.info(f"Fetching design results for project {project_id}")
+        
+        project = db.query(DBProject).filter(
+            DBProject.project_id == project_id
+        ).first()
+        
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        if not project.design_parameters:
+            raise HTTPException(
+                status_code=404, 
+                detail="Design parameters not found. Calculate design first."
+            )
+        
+        # Extract design parameters from stored JSON
+        design_data = project.design_parameters
+        critical_params_data = design_data.get("critical_parameters", {})
+        sampling_plan_data = design_data.get("sampling_plan")
+        
+        critical_params = CriticalParametersResponse(
+            cv_intra=critical_params_data.get("CV_intra"),
+            tmax=critical_params_data.get("Tmax"),
+            t_half=critical_params_data.get("T1/2")
+        )
+        
+        sampling_plan = None
+        if sampling_plan_data:
+            sampling_plan = SamplingPlanResponse(**sampling_plan_data)
+        
+        result = DesignResultResponse(
+            sample_size=design_data.get("sample_size"),
+            recruitment_size=design_data.get("recruitment_size", design_data.get("sample_size")),
+            design_type=design_data.get("design_type"),
+            cv_intra=critical_params_data.get("CV_intra"),
+            power=design_data.get("power"),
+            alpha=design_data.get("alpha"),
+            dropout_rate=design_data.get("dropout_rate", 0.0),
+            screen_fail_rate=design_data.get("screen_fail_rate", 0.0),
+            washout_days=design_data.get("washout_days"),
+            critical_parameters=critical_params,
+            sampling_plan=sampling_plan
+        )
+        
+        logger.info(f"Retrieved design for project {project_id}")
+        return result
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_design_results: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post(
     "/api/v1/reports/{project_id}/generate",
     tags=["Reports"]
 )
@@ -346,11 +539,13 @@ async def generate_report(
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         
-        # Check if we have necessary data
+        # Allow report generation regardless of project status.
+        # Previously this endpoint rejected projects that weren't
+        # in the "completed" state; keep behavior permissive but
+        # log a warning so callers are aware.
         if project.status != "completed":
-            raise HTTPException(
-                status_code=400,
-                detail="Project not yet completed. Cannot generate report."
+            logger.warning(
+                f"Generating report for project {project_id} with status '{project.status}'"
             )
         
         # Generate filename

@@ -58,3 +58,54 @@ class PDFUploadResponse(BaseModel):
     status: str
     message: str
     parameters_found: int
+
+
+class DrugParameterInput(BaseModel):
+    """Input for drug parameter in design calculation."""
+    parameter: str
+    value: float
+    unit: Optional[str] = None
+
+
+class DesignCalculateRequest(BaseModel):
+    """Request to calculate study design parameters."""
+    cv_intra: float = Field(..., description="Intra-individual coefficient of variation (%)")
+    tmax: Optional[float] = Field(None, description="Time to maximum concentration (hours)")
+    t_half: Optional[float] = Field(None, description="Terminal half-life (hours)")
+    power: float = Field(0.80, description="Statistical power (0.0-1.0)")
+    alpha: float = Field(0.05, description="Significance level (0.0-1.0)")
+    dropout_rate: float = Field(0.0, description="Expected dropout rate (%)")
+    screen_fail_rate: float = Field(0.0, description="Expected screen failure rate (%)")
+    project_id: Optional[str] = Field(None, description="Optional project ID to store results")
+
+
+class CriticalParametersResponse(BaseModel):
+    """Critical parameters used for design calculation."""
+    cv_intra: float
+    tmax: Optional[float] = None
+    t_half: Optional[float] = None
+
+
+class SamplingPlanResponse(BaseModel):
+    """Blood sampling plan for pharmacokinetic study."""
+    predose: float
+    post_dose_early: Optional[float] = None
+    post_dose_peak: Optional[float] = None
+    post_dose_late_1: Optional[float] = None
+    post_dose_late_2: Optional[float] = None
+    post_dose_late_3: Optional[float] = None
+
+
+class DesignResultResponse(BaseModel):
+    """Response with calculated study design parameters."""
+    sample_size: int
+    recruitment_size: int  # Adjusted for dropout and screen failure
+    design_type: str
+    cv_intra: float
+    power: float
+    alpha: float
+    dropout_rate: float
+    screen_fail_rate: float
+    washout_days: Optional[float] = None
+    critical_parameters: CriticalParametersResponse
+    sampling_plan: Optional[SamplingPlanResponse] = None

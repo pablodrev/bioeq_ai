@@ -10,6 +10,7 @@ from datetime import datetime
 from docx import Document
 from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -57,15 +58,15 @@ class ReportModule:
             
             cells = table.rows[0].cells
             cells[0].text = "Международное непатентованное название (МНН)"
-            cells[1].text = project.inn_en
+            cells[1].text = str(project.inn_en or "Unknown")
             
             cells = table.rows[1].cells
             cells[0].text = "Лекарственная форма"
-            cells[1].text = project.form
+            cells[1].text = str(project.form or "Not specified")
             
             cells = table.rows[2].cells
             cells[0].text = "Дозировка"
-            cells[1].text = project.dosage
+            cells[1].text = str(project.dosage or "Not specified")
             
             cells = table.rows[3].cells
             cells[0].text = "Тип исследования"
@@ -73,7 +74,7 @@ class ReportModule:
             
             cells = table.rows[4].cells
             cells[0].text = "Статус"
-            cells[1].text = project.status.replace("_", " ").upper()
+            cells[1].text = str((project.status or "unknown").replace("_", " ").upper())
             
             # Extracted parameters
             doc.add_heading("2. Фармакокинетические параметры", level=2)
@@ -96,63 +97,87 @@ class ReportModule:
                 # Data rows
                 for i, param in enumerate(params, 1):
                     cells = param_table.rows[i].cells
-                    cells[0].text = param.parameter
-                    cells[1].text = param.value
-                    cells[2].text = param.unit or ""
-                    cells[3].text = f"PMID: {param.source_pmid}" if param.source_pmid else "Manual"
+                    cells[0].text = str(param.parameter or "")
+                    cells[1].text = str(param.value or "")
+                    cells[2].text = str(param.unit or "")
+                    cells[3].text = f"PMID: {param.source_pmid}" if getattr(param, 'source_pmid', None) else "Manual"
             else:
                 doc.add_paragraph("Параметры не найдены.")
             
             # Design section
-            if project.design_parameters:
+            # Be defensive: `design_parameters` may be None or not a dict
+            design_raw = project.design_parameters
+            design = design_raw if isinstance(design_raw, dict) else {}
+
+            if design:
                 doc.add_heading("3. Дизайн исследования", level=2)
-                design = project.design_parameters
-                
-                design_table = doc.add_table(rows=5, cols=2)
+
+                design_table = doc.add_table(rows=7, cols=2)
                 design_table.style = "Light Grid Accent 1"
-                
+
                 cells = design_table.rows[0].cells
                 cells[0].text = "Дизайн"
-                cells[1].text = design.get("design_type", "N/A")
-                
+                cells[1].text = str(design.get("design_type", "N/A"))
+
                 cells = design_table.rows[1].cells
                 cells[0].text = "Размер выборки (N)"
                 cells[1].text = str(design.get("sample_size", "N/A"))
-                
+
                 cells = design_table.rows[2].cells
-                cells[0].text = "Статистическая мощность"
-                cells[1].text = f"{design.get('power', 0.8) * 100:.0f}%"
-                
+                cells[0].text = "Размер выборки с учетом выбывания (N)"
+                cells[1].text = str(design.get("recruitment_size", design.get("sample_size", "N/A")))
+
                 cells = design_table.rows[3].cells
-                cells[0].text = "CV_intra (%)"
-                cells[1].text = str(design.get("critical_parameters", {}).get("CV_intra", "N/A"))
-                
+                cells[0].text = "Статистическая мощность"
+                try:
+                    power = design.get('power', 0.8)
+                    cells[1].text = f"{float(power) * 100:.0f}%"
+                except Exception:
+                    cells[1].text = str(design.get('power', 'N/A'))
+
                 cells = design_table.rows[4].cells
+                cells[0].text = "CV_intra (%)"
+                crit = design.get("critical_parameters", {}) or {}
+                cells[1].text = str(crit.get("CV_intra", "N/A"))
+
+                cells = design_table.rows[5].cells
                 cells[0].text = "Период отмывания (дней)"
                 cells[1].text = str(design.get("washout_days", "N/A"))
+
+                cells = design_table.rows[6].cells
+                cells[0].text = "Выбывание / Отсев по скринингу (%)"
+                dropout = design.get("dropout_rate", 0.0)
+                screen_fail = design.get("screen_fail_rate", 0.0)
+                cells[1].text = f"{dropout}% / {screen_fail}%"
+
             
             # Regulatory status
-            if project.regulatory_check:
+            # Be defensive: `regulatory_check` may be None or not a dict
+            reg_raw = project.regulatory_check
+            reg = reg_raw if isinstance(reg_raw, dict) else {}
+
+            if reg:
                 doc.add_heading("4. Статус регуляторной проверки", level=2)
-                reg = project.regulatory_check
-                
+
                 status_para = doc.add_paragraph()
-                if reg.get("is_compliant"):
+                if reg.get("is_compliant") is True:
                     status_text = "✓ СООТВЕТСТВУЕТ ТРЕБОВАНИЯМ"
                     status_para.add_run(status_text).font.color.rgb = RGBColor(0, 128, 0)
-                else:
+                elif reg.get("is_compliant") is False:
                     status_text = "✗ ТРЕБУЕТ ДОРАБОТКИ"
                     status_para.add_run(status_text).font.color.rgb = RGBColor(255, 0, 0)
-                
+                else:
+                    status_para.add_run("Статус: N/A")
+
                 if reg.get("critical_issues"):
                     doc.add_paragraph("Критические замечания:", style="Heading 3")
                     for issue in reg["critical_issues"]:
-                        doc.add_paragraph(issue, style="List Bullet")
-                
+                        doc.add_paragraph(str(issue), style="List Bullet")
+
                 if reg.get("warnings"):
                     doc.add_paragraph("Предупреждения:", style="Heading 3")
                     for warning in reg["warnings"]:
-                        doc.add_paragraph(warning, style="List Bullet")
+                        doc.add_paragraph(str(warning), style="List Bullet")
             
             # Footer
             doc.add_paragraph()
@@ -168,11 +193,11 @@ class ReportModule:
             # Save
             doc.save(output_path)
             logger.info(f"Generated report for {project_id} at {output_path}")
-            
+
             return {
                 "success": True,
                 "file_path": output_path,
-                "file_name": output_path.split("\\")[-1]
+                "file_name": Path(output_path).name
             }
         
         except Exception as e:
