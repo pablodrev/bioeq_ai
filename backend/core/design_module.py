@@ -56,9 +56,13 @@ class DesignModule:
                 logger.error(f"CV_intra not found for project {project_id}")
                 return {"error": "CV_intra not found - cannot calculate sample size"}
             
-            # Calculate sample size
-            sample_size, design_type = self.calc.calculate_sample_size(
+            # Decide design type using the same rules as the API
+            design_type = self.calc.choose_design_type(cv_intra, t_half)
+
+            # Calculate sample size for the chosen design
+            sample_size, design_type = self.calc.calculate_sample_size_for_design(
                 cv_intra=cv_intra,
+                design_type=design_type,
                 power=0.80,
                 alpha=0.05
             )
@@ -68,23 +72,25 @@ class DesignModule:
             if t_half:
                 washout_days = self.calc.estimate_washout_period(t_half)
             
-            sampling_plan = None
-            if tmax and t_half:
-                sampling_plan = self.calc.estimate_blood_sampling(tmax, t_half)
+            # sampling_plan removed: no longer estimating blood sampling schedule here
             
             design_params = {
                 "sample_size": sample_size,
+                "recruitment_size": sample_size,
                 "design_type": design_type,
                 "cv_intra": cv_intra,
                 "power": 0.80,
                 "alpha": 0.05,
+                "dropout_rate": 0.0,
+                "screen_fail_rate": 0.0,
                 "washout_days": washout_days,
+                "design_explanation": self.calc.design_explanation(cv_intra, t_half, design_type),
                 "critical_parameters": {
                     "CV_intra": cv_intra,
                     "Tmax": tmax,
                     "T1/2": t_half,
                 },
-                "sampling_plan": sampling_plan
+                # sampling_plan removed
             }
             
             # Save to DB

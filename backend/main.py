@@ -19,7 +19,7 @@ from database import SessionLocal, init_db, get_db
 from schemas import (
     SearchStartRequest, SearchStartResponse, SearchResultsResponse,
     ParameterSchema, PDFUploadResponse, DesignCalculateRequest, 
-    DesignResultResponse, CriticalParametersResponse, SamplingPlanResponse
+    DesignResultResponse, CriticalParametersResponse
 )
 from models import DBProject, DBDrugParameter
 from core.parsing_module import ParsingModule
@@ -75,6 +75,8 @@ app.add_middleware(
         "http://127.0.0.1:3003",
         "http://localhost:3004",
         "http://127.0.0.1:3004",
+        "http://localhost:80",
+        "http://127.0.0.1:80",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -361,13 +363,30 @@ async def calculate_design(
         
         calc = BioeEquivalenceCalculator()
         
-        # Calculate sample size
-        sample_size, design_type = calc.calculate_sample_size(
+        # Decide or validate design type
+        allowed_designs = [
+            "2x2 crossover",
+            "3-way replicate",
+            "4-way replicate",
+            "Параллельный"
+        ]
+
+        if request.desired_design:
+            design_choice = str(request.desired_design)
+            if design_choice not in allowed_designs:
+                raise ValueError(f"desired_design must be one of {allowed_designs}")
+            design_type = design_choice
+        else:
+            design_type = calc.choose_design_type(request.cv_intra, request.t_half)
+
+        # Calculate sample size for selected design
+        sample_size, design_type = calc.calculate_sample_size_for_design(
             cv_intra=request.cv_intra,
+            design_type=design_type,
             power=request.power,
             alpha=request.alpha
         )
-        
+
         # Adjust for dropout and screen failure
         recruitment_size = calc.calculate_recruitment_sample_size(
             sample_size=sample_size,
@@ -380,25 +399,12 @@ async def calculate_design(
         if request.t_half:
             washout_days = calc.estimate_washout_period(request.t_half)
         
-        # Estimate blood sampling plan if both Tmax and T1/2 provided
-        sampling_plan_dict = None
-        if request.tmax and request.t_half:
-            sampling_plan_dict = calc.estimate_blood_sampling(
-                request.tmax, 
-                request.t_half
-            )
-        
         # Prepare response
         critical_params = CriticalParametersResponse(
             cv_intra=request.cv_intra,
             tmax=request.tmax,
             t_half=request.t_half
         )
-        
-        sampling_plan = None
-        if sampling_plan_dict:
-            sampling_plan = SamplingPlanResponse(**sampling_plan_dict)
-        
         result = DesignResultResponse(
             sample_size=sample_size,
             recruitment_size=recruitment_size,
@@ -410,7 +416,7 @@ async def calculate_design(
             screen_fail_rate=request.screen_fail_rate,
             washout_days=washout_days,
             critical_parameters=critical_params,
-            sampling_plan=sampling_plan
+            design_explanation=calc.design_explanation(request.cv_intra, request.t_half, design_type)
         )
         
         # Save calculations to project if project_id is provided
@@ -429,13 +435,14 @@ async def calculate_design(
                     "alpha": request.alpha,
                     "dropout_rate": request.dropout_rate,
                     "screen_fail_rate": request.screen_fail_rate,
+                    "design_explanation": calc.design_explanation(request.cv_intra, request.t_half, design_type),
                     "washout_days": washout_days,
                     "critical_parameters": {
                         "CV_intra": request.cv_intra,
                         "Tmax": request.tmax,
                         "T1/2": request.t_half,
                     },
-                    "sampling_plan": sampling_plan_dict
+                    # sampling_plan removed
                 }
                 db.commit()
                 logger.info(f"Design results saved to project {request.project_id}")
@@ -485,18 +492,13 @@ async def get_design_results(
         # Extract design parameters from stored JSON
         design_data = project.design_parameters
         critical_params_data = design_data.get("critical_parameters", {})
-        sampling_plan_data = design_data.get("sampling_plan")
-        
+
         critical_params = CriticalParametersResponse(
             cv_intra=critical_params_data.get("CV_intra"),
             tmax=critical_params_data.get("Tmax"),
             t_half=critical_params_data.get("T1/2")
         )
-        
-        sampling_plan = None
-        if sampling_plan_data:
-            sampling_plan = SamplingPlanResponse(**sampling_plan_data)
-        
+
         result = DesignResultResponse(
             sample_size=design_data.get("sample_size"),
             recruitment_size=design_data.get("recruitment_size", design_data.get("sample_size")),
@@ -508,7 +510,7 @@ async def get_design_results(
             screen_fail_rate=design_data.get("screen_fail_rate", 0.0),
             washout_days=design_data.get("washout_days"),
             critical_parameters=critical_params,
-            sampling_plan=sampling_plan
+            design_explanation=design_data.get("design_explanation")
         )
         
         logger.info(f"Retrieved design for project {project_id}")

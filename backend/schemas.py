@@ -77,6 +77,10 @@ class DesignCalculateRequest(BaseModel):
     dropout_rate: float = Field(0.0, description="Expected dropout rate (%)")
     screen_fail_rate: float = Field(0.0, description="Expected screen failure rate (%)")
     project_id: Optional[str] = Field(None, description="Optional project ID to store results")
+    desired_design: Optional[str] = Field(
+        None,
+        description="Optional desired study design: '2x2 crossover', '3-way replicate', '4-way replicate', or 'Параллельный'"
+    )
 
 
 class CriticalParametersResponse(BaseModel):
@@ -84,16 +88,6 @@ class CriticalParametersResponse(BaseModel):
     cv_intra: float
     tmax: Optional[float] = None
     t_half: Optional[float] = None
-
-
-class SamplingPlanResponse(BaseModel):
-    """Blood sampling plan for pharmacokinetic study."""
-    predose: float
-    post_dose_early: Optional[float] = None
-    post_dose_peak: Optional[float] = None
-    post_dose_late_1: Optional[float] = None
-    post_dose_late_2: Optional[float] = None
-    post_dose_late_3: Optional[float] = None
 
 
 class DesignResultResponse(BaseModel):
@@ -108,4 +102,4 @@ class DesignResultResponse(BaseModel):
     screen_fail_rate: float
     washout_days: Optional[float] = None
     critical_parameters: CriticalParametersResponse
-    sampling_plan: Optional[SamplingPlanResponse] = None
+    design_explanation: Optional[str] = None

@@ -11,6 +11,7 @@ from docx import Document
 from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from pathlib import Path
+from core.design_module import DesignModule
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,18 @@ class ReportModule:
             # Be defensive: `design_parameters` may be None or not a dict
             design_raw = project.design_parameters
             design = design_raw if isinstance(design_raw, dict) else {}
+
+            # If design not present, attempt to generate it from available parameters
+            if not design:
+                try:
+                    designer = DesignModule(self.db)
+                    generated = designer.generate_design(project_id)
+                    if isinstance(generated, dict) and not generated.get("error"):
+                        design = generated
+                    else:
+                        logger.info(f"Design generation during report: {generated.get('error') if isinstance(generated, dict) else 'unknown error'}")
+                except Exception as e:
+                    logger.warning(f"Failed to auto-generate design during report: {e}")
 
             if design:
                 doc.add_heading("3. Дизайн исследования", level=2)
