@@ -25,7 +25,8 @@ class PubMedClient:
         self,
         substances,
         max_results: int = 5,
-        sort: str = "relevance"
+        sort: str = "relevance",
+        focus_terms: Optional[List[str]] = None
     ) -> List[str]:
         """
         Search PubMed for articles about drug pharmacokinetics.
@@ -49,6 +50,12 @@ class PubMedClient:
             additional = substances[1:]
             additional_query = " OR ".join(additional)
             query = f'"{main_substance}" AND ({additional_query}) AND (pharmacokinetics OR bioequivalence OR bioavailability) AND healthy'
+
+        if focus_terms:
+            normalized_focus = [term.strip() for term in focus_terms if term and term.strip()]
+            if normalized_focus:
+                focus_query = " OR ".join(f'"{term}"' for term in normalized_focus)
+                query = f"{query} AND ({focus_query})"
         
         params = {
             "db": "pubmed",
