@@ -23,8 +23,6 @@ from schemas import (
 )
 from models import DBProject, DBDrugParameter
 from core.parsing_module import ParsingModule
-from core.design_module import DesignModule
-from core.regulatory_module import RegulatoryModule
 from core.report_module import ReportModule
 
 # Load environment variables from .env file

@@ -100,7 +100,7 @@ class DesignResultResponse(BaseModel):
     alpha: float
     dropout_rate: float
     screen_fail_rate: float
-        randomization_scheme: Optional[str] = None
+    randomization_scheme: Optional[str] = None
     washout_days: Optional[float] = None
     critical_parameters: CriticalParametersResponse
     design_explanation: Optional[str] = None
