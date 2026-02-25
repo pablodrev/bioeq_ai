@@ -3,7 +3,7 @@ services:
     image: ${APP_IMAGE}
   
   frontend:
-    image: ${FRONTEND_IMAGE}
+    image: ${FRONTEND_IMAGE:-bioeq-ai-frontend:local}
     container_name: bioeq-ai-frontend
     restart: unless-stopped
     depends_on:
