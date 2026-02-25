@@ -83,8 +83,9 @@ class DesignModule:
                 "alpha": 0.05,
                 "dropout_rate": 0.0,
                 "screen_fail_rate": 0.0,
-                "washout_days": washout_days,
-                "design_explanation": self.calc.design_explanation(cv_intra, t_half, design_type),
+                    "washout_days": washout_days,
+                    "design_explanation": self.calc.design_explanation(cv_intra, t_half, design_type),
+                    "randomization_scheme": self.calc.randomization_scheme(design_type),
                 "critical_parameters": {
                     "CV_intra": cv_intra,
                     "Tmax": tmax,

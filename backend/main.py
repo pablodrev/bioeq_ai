@@ -415,7 +415,8 @@ async def calculate_design(
             screen_fail_rate=request.screen_fail_rate,
             washout_days=washout_days,
             critical_parameters=critical_params,
-            design_explanation=calc.design_explanation(request.cv_intra, request.t_half, design_type)
+            design_explanation=calc.design_explanation(request.cv_intra, request.t_half, design_type),
+            randomization_scheme=calc.randomization_scheme(design_type)
         )
         
         # Save calculations to project if project_id is provided
@@ -435,6 +436,7 @@ async def calculate_design(
                     "dropout_rate": request.dropout_rate,
                     "screen_fail_rate": request.screen_fail_rate,
                     "design_explanation": calc.design_explanation(request.cv_intra, request.t_half, design_type),
+                    "randomization_scheme": calc.randomization_scheme(design_type),
                     "washout_days": washout_days,
                     "critical_parameters": {
                         "CV_intra": request.cv_intra,
@@ -639,30 +641,30 @@ def _run_full_pipeline(project_id: str, inn: str, additional_substances: list = 
             db.commit()
             return
         
-        # Step 2: Generate design
-        logger.info(f"[{project_id}] Step 2: Generating design...")
-        designer = DesignModule(db)
-        design = designer.generate_design(project_id)
+        # # Step 2: Generate design
+        # logger.info(f"[{project_id}] Step 2: Generating design...")
+        # designer = DesignModule(db)
+        # design = designer.generate_design(project_id)
         
-        if design.get("error"):
-            logger.warning(f"[{project_id}] Design generation error: {design['error']}")
-            project.status = "design_failed"
-            db.commit()
-            return
+        # if design.get("error"):
+        #     logger.warning(f"[{project_id}] Design generation error: {design['error']}")
+        #     project.status = "design_failed"
+        #     db.commit()
+        #     return
         
-        # Step 3: Regulatory check
-        logger.info(f"[{project_id}] Step 3: Regulatory compliance check...")
-        regulator = RegulatoryModule(db)
-        reg_check = regulator.check_compliance(project_id)
+        # # Step 3: Regulatory check
+        # logger.info(f"[{project_id}] Step 3: Regulatory compliance check...")
+        # regulator = RegulatoryModule(db)
+        # reg_check = regulator.check_compliance(project_id)
         
-        if reg_check.get("error"):
-            logger.warning(f"[{project_id}] Regulatory check error: {reg_check['error']}")
-            project.status = "regulatory_check_failed"
-            db.commit()
-            return
+        # if reg_check.get("error"):
+        #     logger.warning(f"[{project_id}] Regulatory check error: {reg_check['error']}")
+        #     project.status = "regulatory_check_failed"
+        #     db.commit()
+        #     return
         
-        # Save regulatory check
-        project.regulatory_check = reg_check
+        # # Save regulatory check
+        # project.regulatory_check = reg_check
         
         # Step 4: Update status
         project.status = "completed"

@@ -172,6 +172,38 @@ class BioeEquivalenceCalculator:
             f"CV_intra = {cv_intra}%. При CV > 50% рекомендуется 4-way replicate — "
             "репликатный дизайн с большим числом периодов для контроля высокой внутрисубъектной вариабельности."
         )
+
+    @staticmethod
+    def randomization_scheme(design_type: str) -> str:
+        """
+        Return a human-readable Russian randomization scheme for the chosen design.
+        For RSABE (typically a replicate), return the corresponding replicate scheme.
+        """
+        d = (design_type or "").lower()
+        if "2x2" in d or "crossover" in d:
+            return (
+                "Последовательности: RT / TR (первая группа получает тестируемый препарат, "
+                "затем референтный; вторая – наоборот)."
+            )
+        if "3-way" in d or ("3" in d and "replicate" in d):
+            return (
+                "3-периодный репликатный дизайн с последовательностями RTR / TRT (согласно методу Уильямса)."
+            )
+        if "4-way" in d or ("4" in d and "replicate" in d):
+            return (
+                "4-периодный репликатный дизайн с последовательностями RTRT / TRTR (сбалансированный латинский квадрат)."
+            )
+        if "параллел" in d or "parallel" in d:
+            return (
+                "Параллельный дизайн: две независимые группы (тестируемый и референтный препараты), рандомизация 1:1."
+            )
+        # Fallback: if replicate/RSABE mentioned, map to replicate
+        if "rsabe" in d:
+            return (
+                "Используется репликатная схема (обычно 4-периодная): RTRT / TRTR."
+            )
+        # Generic fallback
+        return "Рандомизационная схема: N/A"
     
     @staticmethod
     def estimate_washout_period(t_half: float) -> float:
