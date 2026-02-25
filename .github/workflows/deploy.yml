@@ -244,7 +244,11 @@ jobs:
             }
 
             APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE pull app"
-            APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE up -d --no-build redis postgres qdrant minio"
+            for container in bioeq-ai-redis bioeq-ai-postgres bioeq-ai-qdrant bioeq-ai-minio; do
+              if docker ps -aq --filter "name=^${container}$" | grep -q .; then
+                docker start "$container" >/dev/null 2>&1 || true
+              fi
+            done
             docker ps -aq --filter "name=bioeq-ai-app" | xargs -r docker rm -f >/dev/null 2>&1 || true
             APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE up -d --remove-orphans --no-build --no-deps app"
 
