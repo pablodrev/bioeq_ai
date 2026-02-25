@@ -262,9 +262,34 @@ jobs:
               exit 1
             fi
 
+            resolve_container_ref() {
+              service="$1"
+              expected_name="$2"
+              ref="$(APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE ps -q $service" | head -n 1)"
+              if [ -n "$ref" ]; then
+                echo "$ref"
+                return 0
+              fi
+              ref="$(docker ps -aq --filter "name=^${expected_name}$" | head -n 1)"
+              if [ -n "$ref" ]; then
+                echo "$ref"
+                return 0
+              fi
+              echo ""
+              return 1
+            }
+
             check_failed=0
-            for container in bioeq-ai-app bioeq-ai-redis bioeq-ai-postgres bioeq-ai-qdrant bioeq-ai-minio; do
-              if ! wait_container_ready "$container" 120; then
+            for spec in "app:bioeq-ai-app" "redis:bioeq-ai-redis" "postgres:bioeq-ai-postgres" "qdrant:bioeq-ai-qdrant" "minio:bioeq-ai-minio"; do
+              service="${spec%%:*}"
+              expected_name="${spec##*:}"
+              container_ref="$(resolve_container_ref "$service" "$expected_name" || true)"
+              if [ -z "$container_ref" ]; then
+                echo "Container reference for service '$service' not found"
+                check_failed=1
+                continue
+              fi
+              if ! wait_container_ready "$container_ref" 120; then
                 check_failed=1
               fi
             done
@@ -272,8 +297,11 @@ jobs:
             if [ "$check_failed" -ne 0 ]; then
               echo "Post-deploy container verification failed"
               APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE ps"
-              for container in bioeq-ai-app bioeq-ai-redis bioeq-ai-postgres bioeq-ai-qdrant bioeq-ai-minio; do
-                docker logs --tail 100 "$container" || true
+              for spec in "app:bioeq-ai-app" "redis:bioeq-ai-redis" "postgres:bioeq-ai-postgres" "qdrant:bioeq-ai-qdrant" "minio:bioeq-ai-minio"; do
+                service="${spec%%:*}"
+                expected_name="${spec##*:}"
+                container_ref="$(resolve_container_ref "$service" "$expected_name" || true)"
+                [ -n "$container_ref" ] && docker logs --tail 100 "$container_ref" || true
               done
               exit 1
             fi
