@@ -3,9 +3,6 @@ services:
     image: ${APP_IMAGE}
   
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
     image: ${FRONTEND_IMAGE:-bioeq-ai-frontend:local}
     container_name: bioeq-ai-frontend
     restart: unless-stopped
@@ -29,7 +26,7 @@ services:
       frontend:
         condition: service_started
     ports:
-      - "${NGINX_PORT:-18080}:80"
+      - "127.0.0.1:${NGINX_PORT:-18080}:80"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
   
@@ -42,8 +39,6 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    ports:
-      - "8001:8000"
     depends_on:
       redis:
         condition: service_healthy

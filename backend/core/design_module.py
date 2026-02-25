@@ -10,12 +10,32 @@ from models import DBProject, DBDrugParameter
 
 logger = logging.getLogger(__name__)
 
+PARAM_NAME_ALIASES = {
+    "cv_intra": "CV_intra",
+    "cvintra": "CV_intra",
+    "intra_subject_cv": "CV_intra",
+    "intrasubject_cv": "CV_intra",
+    "within_subject_cv": "CV_intra",
+    "withinsubject_cv": "CV_intra",
+    "t1_2": "T1/2",
+    "half_life": "T1/2",
+    "half-life": "T1/2",
+}
+
 class DesignModule:
     """Generates study design based on drug parameters."""
     
     def __init__(self, db: Session):
         self.db = db
         self.calc = BioeEquivalenceCalculator()
+
+    @staticmethod
+    def _canonicalize_param_name(raw_name: str) -> str:
+        key = (raw_name or "").strip()
+        if not key:
+            return key
+        normalized = key.lower().replace(" ", "_")
+        return PARAM_NAME_ALIASES.get(normalized, key)
     
     def generate_design(self, project_id: str) -> Dict[str, Any]:
         """
@@ -118,7 +138,7 @@ class DesignModule:
         
         values = [
             float(p.value) for p in params 
-            if p.parameter == param_name and p.is_reliable
+            if self._canonicalize_param_name(p.parameter) == param_name and p.is_reliable
         ]
         
         if not values:

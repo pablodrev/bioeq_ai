@@ -4,7 +4,7 @@ Orchestrates PubMed search, LLM extraction, and result aggregation.
 """
 import logging
 from dotenv import load_dotenv
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Set
 from sqlalchemy.orm import Session
 from services.pubmed import PubMedClient
 from services.llm_client import YandexGPTClient
@@ -17,6 +17,31 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+CV_FOCUS_TERMS = [
+    "intra-subject variability",
+    "within-subject variability",
+    "intrasubject CV",
+    "within-subject CV",
+    "coefficient of variation",
+    "bioequivalence crossover",
+]
+
+PARAM_NAME_ALIASES = {
+    "cmax": "Cmax",
+    "auc": "AUC",
+    "tmax": "Tmax",
+    "t1/2": "T1/2",
+    "t1_2": "T1/2",
+    "half_life": "T1/2",
+    "half-life": "T1/2",
+    "cv_intra": "CV_intra",
+    "cvintra": "CV_intra",
+    "intra_subject_cv": "CV_intra",
+    "intrasubject_cv": "CV_intra",
+    "within_subject_cv": "CV_intra",
+    "withinsubject_cv": "CV_intra",
+}
+
 class ParsingModule:
     """Orchestrates drug parameter data collection."""
     
@@ -24,6 +49,176 @@ class ParsingModule:
         self.db = db
         self.pubmed = PubMedClient()
         self.llm = YandexGPTClient()
+
+    @staticmethod
+    def _canonicalize_param_name(raw_name: str) -> str:
+        key = (raw_name or "").strip()
+        if not key:
+            return key
+        normalized = key.lower().replace(" ", "_")
+        return PARAM_NAME_ALIASES.get(normalized, key)
+
+    @staticmethod
+    def _is_valid_extracted_param(param_data: Dict[str, Any]) -> bool:
+        if param_data is None or not isinstance(param_data, dict):
+            return False
+        if not param_data.get("found"):
+            return False
+        value = param_data.get("value")
+        try:
+            float(value)
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    @staticmethod
+    def _merge_aggregated(
+        target: Dict[str, List[Dict[str, Any]]],
+        source: Dict[str, List[Dict[str, Any]]]
+    ) -> None:
+        for param_name, values in source.items():
+            target.setdefault(param_name, []).extend(values)
+
+    @staticmethod
+    def _cv_signal_score(title: str, abstract: str) -> int:
+        text = f"{title or ''} {abstract or ''}".lower()
+        score = 0
+        if "bioequivalence" in text:
+            score += 2
+        if "crossover" in text or "cross-over" in text:
+            score += 2
+        if "healthy volunteer" in text or "healthy subjects" in text:
+            score += 1
+        for marker in ("intra-subject", "within-subject", "intrasubject", "withinsubject"):
+            if marker in text:
+                score += 3
+        if "coefficient of variation" in text:
+            score += 2
+        if "variability" in text and "inter-individual" not in text:
+            score += 1
+        return score
+
+    def _extract_params_from_article(
+        self,
+        article: Dict[str, str],
+        inn: str,
+        target_only_cv: bool = False
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        extractor = self.llm.extract_cv_intra if target_only_cv else self.llm.extract_parameters
+        params = extractor(article.get("abstract", ""), inn)
+        aggregated: Dict[str, List[Dict[str, Any]]] = {}
+
+        for raw_name, param_data in params.items():
+            canonical_name = self._canonicalize_param_name(raw_name)
+            if target_only_cv and canonical_name != "CV_intra":
+                continue
+            if not self._is_valid_extracted_param(param_data):
+                continue
+
+            aggregated.setdefault(canonical_name, []).append({
+                "value": param_data.get("value"),
+                "unit": param_data.get("unit"),
+                "pmid": article.get("pmid"),
+                "title": article.get("title"),
+            })
+        return aggregated
+
+    def _extract_missing_cv_intra(
+        self,
+        inn: str,
+        substances: List[str],
+        max_articles: int,
+        already_seen_pmids: Set[str]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Targeted second pass for CV_intra using focus terms and CV-oriented extraction.
+        """
+        pmids = self.pubmed.search(
+            substances,
+            max_results=max(max_articles, 15),
+            sort="relevance",
+            focus_terms=CV_FOCUS_TERMS,
+        )
+        new_pmids = [pmid for pmid in pmids if pmid and pmid not in already_seen_pmids]
+        if not new_pmids:
+            return {}
+
+        articles = self.pubmed.fetch_abstracts(new_pmids)
+        if not articles:
+            return {}
+
+        scored = sorted(
+            articles,
+            key=lambda a: self._cv_signal_score(a.get("title", ""), a.get("abstract", "")),
+            reverse=True,
+        )
+
+        aggregated: Dict[str, List[Dict[str, Any]]] = {}
+        for article in scored[:10]:
+            already_seen_pmids.add(article.get("pmid", ""))
+            extracted = self._extract_params_from_article(article, inn, target_only_cv=True)
+            self._merge_aggregated(aggregated, extracted)
+        return aggregated
+
+    def _extract_missing_cv_intra_from_fulltext(
+        self,
+        inn: str,
+        candidate_pmids: List[str]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Final retrieval pass: fetch PMC full texts and extract CV_intra from relevant snippets.
+        """
+        if not candidate_pmids:
+            return {}
+
+        pmid_to_pmcid = self.pubmed.map_pmids_to_pmcids(candidate_pmids)
+        if not pmid_to_pmcid:
+            return {}
+
+        fulltexts = self.pubmed.fetch_pmc_fulltexts(pmid_to_pmcid)
+        if not fulltexts:
+            return {}
+
+        aggregated: Dict[str, List[Dict[str, Any]]] = {}
+        focus_tokens = (
+            "intra-subject", "within-subject", "intrasubject", "withinsubject",
+            "coefficient of variation", "variability", "bioequivalence", "crossover"
+        )
+
+        for pmid, full_text in fulltexts.items():
+            text = full_text or ""
+            text_lower = text.lower()
+            candidate_windows: List[str] = []
+
+            for token in focus_tokens:
+                idx = text_lower.find(token)
+                if idx == -1:
+                    continue
+                start = max(0, idx - 800)
+                end = min(len(text), idx + 2200)
+                window = text[start:end]
+                if window and window not in candidate_windows:
+                    candidate_windows.append(window)
+
+            # Fall back to head chunk if no explicit marker found
+            if not candidate_windows and text:
+                candidate_windows.append(text[:3000])
+
+            for snippet in candidate_windows[:3]:
+                params = self.llm.extract_cv_intra(snippet, inn)
+                cv = params.get("CV_intra") if isinstance(params, dict) else None
+                if not self._is_valid_extracted_param(cv):
+                    continue
+                aggregated.setdefault("CV_intra", []).append({
+                    "value": cv.get("value"),
+                    "unit": cv.get("unit"),
+                    "pmid": pmid,
+                    "title": "PMC full text",
+                })
+                # One good hit per article is enough
+                break
+
+        return aggregated
     
     def search_and_extract(
         self,
@@ -67,32 +262,37 @@ class ParsingModule:
                 return {"error": "Failed to fetch abstracts", "parameters": []}
             
             # Step 3: Extract parameters via LLM
-            aggregated_params = {}
+            aggregated_params: Dict[str, List[Dict[str, Any]]] = {}
+            processed_pmids: Set[str] = set()
             
             for article in articles:
                 pmid = article["pmid"]
-                title = article["title"]
-                abstract = article["abstract"]
+                processed_pmids.add(pmid)
                 
                 logger.info(f"[{project_id}] Extracting from PMID {pmid}...")
-                
-                # Call LLM
-                params = self.llm.extract_parameters(abstract, inn)
-                
-                # Process extracted parameters
-                for param_name, param_data in params.items():
-                    if param_data is None or not param_data.get("found"):
-                        continue
-                    
-                    if param_name not in aggregated_params:
-                        aggregated_params[param_name] = []
-                    
-                    aggregated_params[param_name].append({
-                        "value": param_data.get("value"),
-                        "unit": param_data.get("unit"),
-                        "pmid": pmid,
-                        "title": title
-                    })
+
+                extracted = self._extract_params_from_article(article, inn, target_only_cv=False)
+                self._merge_aggregated(aggregated_params, extracted)
+
+            # Step 3b: targeted enrichment for missing critical parameter CV_intra
+            if "CV_intra" not in aggregated_params:
+                logger.info(f"[{project_id}] CV_intra missing after first pass. Running targeted CV_intra retrieval...")
+                cv_only = self._extract_missing_cv_intra(
+                    inn=inn,
+                    substances=substances,
+                    max_articles=max_articles,
+                    already_seen_pmids=processed_pmids,
+                )
+                self._merge_aggregated(aggregated_params, cv_only)
+
+            # Step 3c: final full-text retrieval pass via PMC when abstract passes failed
+            if "CV_intra" not in aggregated_params:
+                logger.info(f"[{project_id}] CV_intra still missing. Running PMC full-text retrieval pass...")
+                cv_from_fulltext = self._extract_missing_cv_intra_from_fulltext(
+                    inn=inn,
+                    candidate_pmids=list(processed_pmids),
+                )
+                self._merge_aggregated(aggregated_params, cv_from_fulltext)
             
             # Step 4: Save to database
             logger.info(f"[{project_id}] Saving {len(aggregated_params)} parameter types to DB...")
@@ -120,10 +320,17 @@ class ParsingModule:
             if project:
                 project.status = "searching_completed"
                 project.search_results = {
-                    "articles_processed": len(articles),
+                    "articles_processed": len(processed_pmids),
                     "parameters_found": {
                         k: len(v) for k, v in aggregated_params.items()
                     },
+                    "critical_coverage": {
+                        "CV_intra": len(aggregated_params.get("CV_intra", [])) > 0
+                    },
+                    "missing_critical": [
+                        name for name in ["CV_intra"]
+                        if len(aggregated_params.get(name, [])) == 0
+                    ],
                     "timestamp": datetime.utcnow().isoformat()
                 }
                 self.db.commit()

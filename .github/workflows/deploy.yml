@@ -12,7 +12,6 @@ permissions:
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/bioeq-ai
-  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/bioeq-ai-frontend
 
 jobs:
   quality:
@@ -87,7 +86,7 @@ jobs:
           EOF
 
       - name: Start docker compose stack
-        run: docker compose up -d --build
+        run: docker compose up -d --build redis postgres qdrant minio app health
 
       - name: Wait for app health
         run: |
@@ -217,56 +216,80 @@ jobs:
               exit 1
             fi
 
+            wait_container_ready() {
+              name="$1"
+              timeout_seconds="${2:-120}"
+              last_state="unknown"
+              last_health="unknown"
+
+              for _ in $(seq 1 "$timeout_seconds"); do
+                last_state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)"
+                last_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$name" 2>/dev/null || echo unknown)"
+
+                if [ "$last_state" = "running" ] && { [ "$last_health" = "healthy" ] || [ "$last_health" = "none" ]; }; then
+                  echo "Container $name is OK (state=$last_state, health=$last_health)"
+                  return 0
+                fi
+
+                if [ "$last_state" = "exited" ] || [ "$last_state" = "dead" ] || [ "$last_health" = "unhealthy" ]; then
+                  echo "Container $name is not ready (state=$last_state, health=$last_health)"
+                  return 1
+                fi
+
+                sleep 2
+              done
+
+              echo "Container $name readiness timeout (state=$last_state, health=$last_health)"
+              return 1
+            }
+
             APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE pull app"
+            APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE up -d --no-build --no-recreate redis postgres qdrant minio"
             docker ps -aq --filter "name=bioeq-ai-app" | xargs -r docker rm -f >/dev/null 2>&1 || true
             APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE up -d --remove-orphans --no-build --no-deps app"
 
-            app_ready=0
-            for i in $(seq 1 60); do
-              if curl -fsS http://127.0.0.1:8000/health >/dev/null || curl -fsS http://127.0.0.1:8000/api/v1/health >/dev/null; then
-                app_ready=1
-                break
-              fi
-              sleep 2
-            done
-
-            if [ "$app_ready" -ne 1 ]; then
-              echo "Deploy health check failed on server"
+            if ! wait_container_ready "bioeq-ai-app" 180; then
+              echo "App container did not become ready"
               APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE ps"
-              docker logs --tail 100 bioeq-ai-app || true
+              docker logs --tail 200 bioeq-ai-app || true
               exit 1
             fi
 
-            wait_container_ready() {
-              name="$1"
-              timeout_seconds="${2:-120}"
-              last_state="unknown"
-              last_health="unknown"
+            if ! docker exec bioeq-ai-app sh -c "curl -fsS http://localhost:8000/health >/dev/null || curl -fsS http://localhost:8000/api/v1/health >/dev/null"; then
+              echo "App health endpoint is not responding from inside container"
+              APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE ps"
+              docker logs --tail 200 bioeq-ai-app || true
+              exit 1
+            fi
 
-              for _ in $(seq 1 "$timeout_seconds"); do
-                last_state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)"
-                last_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$name" 2>/dev/null || echo unknown)"
-
-                if [ "$last_state" = "running" ] && { [ "$last_health" = "healthy" ] || [ "$last_health" = "none" ]; }; then
-                  echo "Container $name is OK (state=$last_state, health=$last_health)"
-                  return 0
-                fi
-
-                if [ "$last_state" = "exited" ] || [ "$last_state" = "dead" ] || [ "$last_health" = "unhealthy" ]; then
-                  echo "Container $name is not ready (state=$last_state, health=$last_health)"
-                  return 1
-                fi
-
-                sleep 2
-              done
-
-              echo "Container $name readiness timeout (state=$last_state, health=$last_health)"
+            resolve_container_ref() {
+              service="$1"
+              expected_name="$2"
+              ref="$(APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE ps -q $service" | head -n 1)"
+              if [ -n "$ref" ]; then
+                echo "$ref"
+                return 0
+              fi
+              ref="$(docker ps -aq --filter "name=^${expected_name}$" | head -n 1)"
+              if [ -n "$ref" ]; then
+                echo "$ref"
+                return 0
+              fi
+              echo ""
               return 1
             }
 
             check_failed=0
-            for container in bioeq-ai-app bioeq-ai-redis bioeq-ai-postgres bioeq-ai-qdrant bioeq-ai-minio; do
-              if ! wait_container_ready "$container" 120; then
+            for spec in "app:bioeq-ai-app" "redis:bioeq-ai-redis" "postgres:bioeq-ai-postgres" "qdrant:bioeq-ai-qdrant" "minio:bioeq-ai-minio"; do
+              service="${spec%%:*}"
+              expected_name="${spec##*:}"
+              container_ref="$(resolve_container_ref "$service" "$expected_name" || true)"
+              if [ -z "$container_ref" ]; then
+                echo "Container reference for service '$service' not found"
+                check_failed=1
+                continue
+              fi
+              if ! wait_container_ready "$container_ref" 120; then
                 check_failed=1
               fi
             done
@@ -274,202 +297,12 @@ jobs:
             if [ "$check_failed" -ne 0 ]; then
               echo "Post-deploy container verification failed"
               APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE ps"
-              for container in bioeq-ai-app bioeq-ai-redis bioeq-ai-postgres bioeq-ai-qdrant bioeq-ai-minio; do
-                docker logs --tail 100 "$container" || true
+              for spec in "app:bioeq-ai-app" "redis:bioeq-ai-redis" "postgres:bioeq-ai-postgres" "qdrant:bioeq-ai-qdrant" "minio:bioeq-ai-minio"; do
+                service="${spec%%:*}"
+                expected_name="${spec##*:}"
+                container_ref="$(resolve_container_ref "$service" "$expected_name" || true)"
+                [ -n "$container_ref" ] && docker logs --tail 100 "$container_ref" || true
               done
               exit 1
             fi
 
-  frontend_quality:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend dependencies
-        run: npm ci
-        working-directory: frontend
-
-      - name: Run frontend type check
-        run: npm run lint
-        working-directory: frontend
-
-      - name: Build frontend
-        run: npm run build
-        working-directory: frontend
-
-  frontend_build:
-    needs: frontend_quality
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push frontend Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./frontend
-          file: ./frontend/Dockerfile
-          push: true
-          tags: |
-            ${{ env.FRONTEND_IMAGE }}:latest
-            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
-
-  frontend_deploy:
-    needs: frontend_build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy frontend on server via SSH
-        uses: appleboy/ssh-action@v1.2.0
-        env:
-          FRONTEND_IMAGE: ${{ env.FRONTEND_IMAGE }}
-          FRONTEND_IMAGE_TAG: ${{ github.sha }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          REPO_NAME: ${{ github.event.repository.name }}
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          port: ${{ secrets.SERVER_PORT || '22' }}
-          envs: FRONTEND_IMAGE,FRONTEND_IMAGE_TAG,DEPLOY_PATH,GHCR_USERNAME,GHCR_TOKEN,REPO_NAME
-          script: |
-            set -eu
-            if [ -z "${DEPLOY_PATH:-}" ]; then
-              echo "DEPLOY_PATH is not set"
-              exit 1
-            fi
-
-            CANDIDATE_PATHS="$DEPLOY_PATH $HOME/$REPO_NAME $HOME/bioeq_ai"
-            WORKDIR=""
-            for path in $CANDIDATE_PATHS; do
-              if [ -d "$path" ] && { [ -f "$path/docker-compose.yml" ] || [ -f "$path/docker-compose.yaml" ]; }; then
-                WORKDIR="$path"
-                break
-              fi
-            done
-
-            if [ -z "$WORKDIR" ]; then
-              echo "Could not find docker compose files in any candidate path:"
-              for path in $CANDIDATE_PATHS; do
-                echo " - $path"
-                if [ -d "$path" ]; then
-                  ls -la "$path"
-                else
-                  echo "   (directory does not exist)"
-                fi
-              done
-              exit 1
-            fi
-
-            cd "$WORKDIR"
-            echo "Using deploy directory: $WORKDIR"
-            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
-
-            if docker compose version >/dev/null 2>&1; then
-              COMPOSE_CMD="docker compose"
-            elif command -v docker-compose >/dev/null 2>&1; then
-              COMPOSE_CMD="docker-compose"
-            else
-              echo "Neither 'docker compose' nor 'docker-compose' is available on server"
-              exit 1
-            fi
-
-            if [ -f docker-compose.yml ]; then
-              BASE_COMPOSE_FILE="docker-compose.yml"
-            elif [ -f docker-compose.yaml ]; then
-              BASE_COMPOSE_FILE="docker-compose.yaml"
-            else
-              echo "Base docker compose file not found in $WORKDIR"
-              ls -la
-              exit 1
-            fi
-
-            if [ -f docker-compose.prod.yml ]; then
-              PROD_COMPOSE_FILE="docker-compose.prod.yml"
-            elif [ -f docker-compose.prod.yaml ]; then
-              PROD_COMPOSE_FILE="docker-compose.prod.yaml"
-            else
-              echo "Production docker compose file not found in $WORKDIR"
-              ls -la
-              exit 1
-            fi
-
-            FRONTEND_IMAGE="$FRONTEND_IMAGE:$FRONTEND_IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE pull frontend"
-            docker ps -aq --filter "name=bioeq-ai-frontend" | xargs -r docker rm -f >/dev/null 2>&1 || true
-            FRONTEND_IMAGE="$FRONTEND_IMAGE:$FRONTEND_IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE up -d --remove-orphans --no-build --no-deps frontend nginx"
-
-            frontend_ready=0
-            for i in $(seq 1 60); do
-              status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' bioeq-ai-frontend 2>/dev/null || true)"
-              if [ "$status" = "healthy" ]; then
-                frontend_ready=1
-                break
-              fi
-              sleep 2
-            done
-
-            if [ "$frontend_ready" -ne 1 ]; then
-              echo "Frontend deploy health check failed on server"
-              FRONTEND_IMAGE="$FRONTEND_IMAGE:$FRONTEND_IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE ps"
-              docker logs --tail 100 bioeq-ai-frontend || true
-              exit 1
-            fi
-
-            wait_container_ready() {
-              name="$1"
-              timeout_seconds="${2:-120}"
-              last_state="unknown"
-              last_health="unknown"
-
-              for _ in $(seq 1 "$timeout_seconds"); do
-                last_state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)"
-                last_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$name" 2>/dev/null || echo unknown)"
-
-                if [ "$last_state" = "running" ] && { [ "$last_health" = "healthy" ] || [ "$last_health" = "none" ]; }; then
-                  echo "Container $name is OK (state=$last_state, health=$last_health)"
-                  return 0
-                fi
-
-                if [ "$last_state" = "exited" ] || [ "$last_state" = "dead" ] || [ "$last_health" = "unhealthy" ]; then
-                  echo "Container $name is not ready (state=$last_state, health=$last_health)"
-                  return 1
-                fi
-
-                sleep 2
-              done
-
-              echo "Container $name readiness timeout (state=$last_state, health=$last_health)"
-              return 1
-            }
-
-            check_failed=0
-            for container in bioeq-ai-frontend bioeq-ai-nginx bioeq-ai-app; do
-              if ! wait_container_ready "$container" 120; then
-                check_failed=1
-              fi
-            done
-
-            if [ "$check_failed" -ne 0 ]; then
-              echo "Post-deploy container verification failed"
-              FRONTEND_IMAGE="$FRONTEND_IMAGE:$FRONTEND_IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE ps"
-              for container in bioeq-ai-frontend bioeq-ai-nginx bioeq-ai-app; do
-                docker logs --tail 100 "$container" || true
-              done
-              exit 1
-            fi
