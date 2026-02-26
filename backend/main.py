@@ -509,7 +509,8 @@ async def get_design_results(
             screen_fail_rate=design_data.get("screen_fail_rate", 0.0),
             washout_days=design_data.get("washout_days"),
             critical_parameters=critical_params,
-            design_explanation=design_data.get("design_explanation")
+            design_explanation=design_data.get("design_explanation"),
+            randomization_scheme=design_data.get("randomization_scheme")
         )
         
         logger.info(f"Retrieved design for project {project_id}")
@@ -629,7 +630,7 @@ def _run_full_pipeline(project_id: str, inn: str, additional_substances: list = 
         logger.info(f"[{project_id}] Step 1: Searching PubMed...")
         parser = ParsingModule(db)
         search_results = parser.search_and_extract(
-            project_id, inn, max_articles=10,
+            project_id, inn, max_articles=15,
             additional_substances=additional_substances
         )
         
