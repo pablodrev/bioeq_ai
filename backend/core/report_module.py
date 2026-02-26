@@ -6,12 +6,11 @@ import os
 import re
 import logging
 import requests
-from typing import Optional, List, Tuple
+from typing import List, Tuple
 from docx import Document
-from docx.shared import RGBColor, Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import RGBColor
 
-from schemas import CriticalParametersResponse, DesignResultResponse
+from schemas import DesignResultResponse
 
 # --- Настройка логирования ---
 logging.basicConfig(
@@ -95,9 +94,12 @@ class SynopsisAssistant:
 
     def _add_run(self, paragraph, text, color=None, bold=False, italic=False):
         run = paragraph.add_run(text)
-        if color: run.font.color.rgb = color
-        if bold: run.bold = True
-        if italic: run.italic = True
+        if color:
+            run.font.color.rgb = color
+        if bold:
+            run.bold = True
+        if italic:
+            run.italic = True
         return run
 
     def fill_and_save(self, template_path: str, output_path: str):
