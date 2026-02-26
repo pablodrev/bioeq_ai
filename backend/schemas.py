@@ -81,26 +81,28 @@ class DesignCalculateRequest(BaseModel):
         None,
         description="Optional desired study design: '2x2 crossover', '3-way replicate', '4-way replicate', or 'Параллельный'"
     )
+    drug_name_t: Optional[str] = Field(None, description="Test drug name for report")
+    drug_name_r: Optional[str] = Field(None, description="Reference drug name for report")
 
 
 class CriticalParametersResponse(BaseModel):
     """Critical parameters used for design calculation."""
-    cv_intra: float
-    tmax: Optional[float] = None
-    t_half: Optional[float] = None
+    cv_intra: float  # Intra-individual coefficient of variation (%), reflects variability within subjects
+    tmax: Optional[float] = None  # Time to maximum plasma concentration (hours), indicates absorption rate
+    t_half: Optional[float] = None  # Terminal elimination half-life (hours), describes drug clearance
 
 
 class DesignResultResponse(BaseModel):
     """Response with calculated study design parameters."""
-    sample_size: int
-    recruitment_size: int  # Adjusted for dropout and screen failure
-    design_type: str
-    cv_intra: float
-    power: float
-    alpha: float
-    dropout_rate: float
-    screen_fail_rate: float
-    randomization_scheme: Optional[str] = None
-    washout_days: Optional[float] = None
-    critical_parameters: CriticalParametersResponse
-    design_explanation: Optional[str] = None
+    sample_size: int  # Number of subjects required for statistical power
+    recruitment_size: int  # Total subjects to recruit (accounts for dropout and screen failure)
+    design_type: str  # Study design (e.g., '2x2 crossover', 'parallel')
+    cv_intra: float  # Intra-individual coefficient of variation (%)
+    power: float  # Desired statistical power (probability of detecting true effect)
+    alpha: float  # Significance level (probability of Type I error)
+    dropout_rate: float  # Expected dropout rate (%) during study
+    screen_fail_rate: float  # Expected screen failure rate (%) at screening
+    randomization_scheme: Optional[str] = None  # Description of subject randomization (e.g., block, stratified)
+    washout_days: Optional[float] = None  # Washout period between study periods (days)
+    critical_parameters: CriticalParametersResponse  # Key pharmacokinetic parameters used in design
+    design_explanation: Optional[str] = None  # Textual explanation of design choices and calculations

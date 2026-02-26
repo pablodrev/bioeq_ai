@@ -1,7 +1,3 @@
-"""
-Report generation module with LLM-powered synopsis generation.
-Generates DOCX report with intelligent document filling.
-"""
 import os
 import re
 import logging
@@ -174,117 +170,31 @@ class SynopsisAssistant:
             # Красим текст в таблице в оранжевый для соответствия
             row_cells[1].paragraphs[0].runs[0].font.color.rgb = self.COLOR_AI
 
+# --- Пример использования ---
+if __name__ == "__main__":
+    # 1. Загрузка данных (имитация данных из БД или калькулятора)
+    crit = CriticalParametersResponse(cv_intra=26.0, tmax=2.0, t_half=14.5)
+    design = DesignResultResponse(
+        sample_size=28, recruitment_size=34, design_type="2-way crossover",
+        cv_intra=26.0, power=0.8, alpha=0.05, dropout_rate=10.0,
+        screen_fail_rate=20.0, washout_days=10.0, critical_parameters=crit
+    )
 
-# --- Compatibility wrapper for API ---
-class ReportModule:
-    """Wrapper for legacy API compatibility with LLM-powered synopsis generation."""
+    # 2. Инициализация
+    api_key = os.getenv("YANDEX_GPT_API_KEY")
+    folder_id = os.getenv("YANDEX_FOLDER_ID")
     
-    def __init__(self, db=None):
-        """Initialize with optional database connection (for compatibility)."""
-        self.db = db
+    gpt_module = YandexGPTAssistant(api_key, folder_id)
     
-    def generate_synopsis(self, project_id: str, output_path: str) -> dict:
-        """
-        Generate DOCX report with LLM-powered synopsis.
-        Uses template.md and SynopsisAssistant for intelligent filling.
-        
-        Args:
-            project_id: Project UUID
-            output_path: Path to save DOCX file
-        
-        Returns:
-            Dict with status and file path
-        """
-        try:
-            if not self.db:
-                return {"error": "Database connection required"}
-            
-            from models import DBProject
-            from pathlib import Path
-            
-            # Fetch project
-            project = self.db.query(DBProject).filter(
-                DBProject.project_id == project_id
-            ).first()
-            
-            if not project:
-                return {"error": "Project not found"}
-            
-            # Get design parameters
-            design_raw = project.design_parameters
-            design = design_raw if isinstance(design_raw, dict) else {}
-            
-            # If design not present, attempt to generate it
-            if not design:
-                try:
-                    from design_module import DesignModule
-                    designer = DesignModule(self.db)
-                    generated = designer.generate_design(project_id)
-                    if isinstance(generated, dict) and not generated.get("error"):
-                        design = generated
-                    else:
-                        logger.warning(f"Design generation: {generated.get('error') if isinstance(generated, dict) else 'unknown error'}")
-                        # Return error if no design available
-                        return {"error": "Cannot generate design parameters"}
-                except Exception as e:
-                    logger.warning(f"Failed to auto-generate design: {e}")
-                    return {"error": f"Design generation failed: {str(e)}"}
-            
-            # Convert design dict to DesignResultResponse object if needed
-            if isinstance(design, dict):
-                design_obj = DesignResultResponse(**design)
-            else:
-                design_obj = design
-            
-            # Initialize SynopsisAssistant with project data
-            # Extract drug names and conditions from project or use defaults
-            drug_name_t = project.drug_name_t or project.inn_en or "Test Drug"
-            drug_name_r = project.drug_name_r or "Reference Drug"
-            conditions = getattr(project, 'administration_conditions', None) or "Fasting"
-            shape = project.shape or "Not specified"
-            
-            synopsis = SynopsisAssistant(
-                drug_name_t=drug_name_t,
-                drug_name_r=drug_name_r,
-                conditions=conditions,
-                shape=shape,
-                design_data=design_obj
-            )
-            
-            # Setup LLM if credentials available
-            api_key = os.getenv("YANDEX_GPT_API_KEY")
-            folder_id = os.getenv("YANDEX_FOLDER_ID")
-            
-            if api_key and folder_id:
-                gpt_assistant = YandexGPTAssistant(api_key, folder_id)
-                synopsis.set_llm(gpt_assistant)
-                logger.info(f"LLM assistant enabled for {project_id}")
-            else:
-                logger.info(f"LLM not configured, using static data only for {project_id}")
-            
-            # Determine template path
-            template_dir = Path(__file__).parent
-            template_path = template_dir / "template.md"
-            
-            if not template_path.exists():
-                # Try alternative location
-                template_path = Path(__file__).parent.parent / "templates" / "template.md"
-            
-            if not template_path.exists():
-                return {"error": f"Template file not found at {template_path}"}
-            
-            # Generate report using SynopsisAssistant
-            logger.info(f"Generating synopsis for {project_id} using template: {template_path}")
-            synopsis.fill_and_save(str(template_path), output_path)
-            
-            logger.info(f"Report generated for {project_id} at {output_path}")
-            
-            return {
-                "success": True,
-                "file_path": output_path,
-                "file_name": Path(output_path).name
-            }
-        
-        except Exception as e:
-            logger.error(f"Error generating report: {e}", exc_info=True)
-            return {"error": str(e)}
+    synopsis = SynopsisAssistant(
+        drug_name_t="Ривароксабан", 
+        drug_name_r="Ксарелто®",
+        conditions="натощак",
+        shape="таблетки, покрытые пленочной оболочкой, 20 мг",
+        design_data=design
+    )
+    
+    synopsis.set_llm(gpt_module)
+    
+    # 3. Запуск
+    synopsis.fill_and_save("template.md", "Готовый_Синопсис.docx")

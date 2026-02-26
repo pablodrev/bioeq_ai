@@ -319,6 +319,7 @@ class ParsingModule:
             
             if project:
                 project.status = "searching_completed"
+                project.shape = project.shape  # Save form as shape for report
                 project.search_results = {
                     "articles_processed": len(processed_pmids),
                     "parameters_found": {

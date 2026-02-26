@@ -14,7 +14,9 @@ class DBProject(Base):
     inn_en: str = Column(String, nullable=False)  # Drug name in English
     inn_ru: str = Column(String, nullable=True)   # Drug name in Russian
     dosage: str = Column(String, nullable=False)
-    form: str = Column(String, nullable=False)
+    shape: str = Column(String, nullable=True)  # Drug form/shape from search
+    drug_name_t: str = Column(String, nullable=True)  # Test drug name from design
+    drug_name_r: str = Column(String, nullable=True)  # Reference drug name from design
     
     status: str = Column(String, default="searching")  # searching, completed, failed
     created_at: datetime = Column(DateTime, default=datetime.utcnow)

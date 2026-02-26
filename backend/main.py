@@ -116,7 +116,7 @@ async def start_search(
             inn_en=request.inn_en,
             inn_ru=request.inn_ru,
             dosage=request.dosage,
-            form=request.form,
+            shape=request.form,  # form from request -> shape field
             status="searching"
         )
         db.add(project)
@@ -181,7 +181,7 @@ async def upload_pdf(
             inn_en=inn_en or "Unknown",
             inn_ru=inn_ru,
             dosage=dosage or "Not specified",
-            form=form or "Not specified",
+            shape=form or "Not specified",  # form from request -> shape field
             status="uploading"
         )
         db.add(project)
@@ -313,7 +313,7 @@ async def get_project_details(
             "inn_en": project.inn_en,
             "inn_ru": project.inn_ru,
             "dosage": project.dosage,
-            "form": project.form,
+            "shape": project.shape,
             "status": project.status,
             "created_at": project.created_at,
             "updated_at": project.updated_at,
@@ -424,6 +424,12 @@ async def calculate_design(
             ).first()
             
             if project:
+                # Save drug names from design
+                if request.drug_name_t:
+                    project.drug_name_t = request.drug_name_t
+                if request.drug_name_r:
+                    project.drug_name_r = request.drug_name_r
+                
                 project.design_parameters = {
                     "sample_size": sample_size,
                     "recruitment_size": recruitment_size,
@@ -437,9 +443,9 @@ async def calculate_design(
                     "randomization_scheme": calc.randomization_scheme(design_type),
                     "washout_days": washout_days,
                     "critical_parameters": {
-                        "CV_intra": request.cv_intra,
-                        "Tmax": request.tmax,
-                        "T1/2": request.t_half,
+                        "cv_intra": request.cv_intra,
+                        "tmax": request.tmax,
+                        "t_half": request.t_half,
                     },
                     # sampling_plan removed
                 }
@@ -493,16 +499,16 @@ async def get_design_results(
         critical_params_data = design_data.get("critical_parameters", {})
 
         critical_params = CriticalParametersResponse(
-            cv_intra=critical_params_data.get("CV_intra"),
-            tmax=critical_params_data.get("Tmax"),
-            t_half=critical_params_data.get("T1/2")
+            cv_intra=critical_params_data.get("cv_intra"),
+            tmax=critical_params_data.get("tmax"),
+            t_half=critical_params_data.get("t_half")
         )
 
         result = DesignResultResponse(
             sample_size=design_data.get("sample_size"),
             recruitment_size=design_data.get("recruitment_size", design_data.get("sample_size")),
             design_type=design_data.get("design_type"),
-            cv_intra=critical_params_data.get("CV_intra"),
+            cv_intra=design_data.get("cv_intra"),
             power=design_data.get("power"),
             alpha=design_data.get("alpha"),
             dropout_rate=design_data.get("dropout_rate", 0.0),
