@@ -245,6 +245,18 @@ jobs:
 
             APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE pull app"
             APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE up -d --no-build --no-recreate redis postgres qdrant minio"
+
+            echo "Waiting for postgres to be healthy..."
+            wait_container_ready "bioeq-ai-postgres" 60
+
+            echo "Running Alembic migrations..."
+            docker run --rm \
+              --network "$(docker inspect bioeq-ai-postgres -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}')" \
+              --env-file .env \
+              -e PYTHONPATH=/app/backend:/app \
+              "$IMAGE_NAME:$IMAGE_TAG" \
+              python -c "from database import run_migrations; run_migrations()"
+
             docker ps -aq --filter "name=bioeq-ai-app" | xargs -r docker rm -f >/dev/null 2>&1 || true
             APP_IMAGE="$IMAGE_NAME:$IMAGE_TAG" sh -c "$COMPOSE_CMD -f $BASE_COMPOSE_FILE -f $PROD_COMPOSE_FILE up -d --remove-orphans --no-build --no-deps app"
 
